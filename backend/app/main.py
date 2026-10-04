@@ -13,7 +13,7 @@ from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.staticfiles import StaticFiles
 
-from app.api import agent, agent_data, assets, bridge, drafts, pipeline
+from app.api import agent, agent_data, analytics, assets, bridge, drafts, pipeline
 from app.core.config import settings
 from app.db.session import init_db
 
@@ -58,6 +58,8 @@ app.include_router(drafts.router)
 app.include_router(bridge.router)
 # 素材工坊：AI 生图 / 图生视频 / ffmpeg 合成
 app.include_router(assets.router)
+# 数据看板：快照 / 爆文提炼 / 回流选题
+app.include_router(analytics.router)
 
 
 # ── 生成的素材静态服务（封面/内页/视频）────────────────────
