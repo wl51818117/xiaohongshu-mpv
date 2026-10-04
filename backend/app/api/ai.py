@@ -12,6 +12,7 @@ from sqlalchemy.orm import Session
 from app.db.models import Draft, Topic
 from app.db.session import get_db
 from app.services import ai_writer
+from app.services.topic_state import sync_topic_status
 
 router = APIRouter(prefix="/api/ai", tags=["ai"])
 
@@ -138,6 +139,10 @@ async def polish(payload: PolishIn, db: Session = Depends(get_db)) -> dict:
                 ai_declaration=d.ai_declaration,
                 pipeline_type=d.pipeline_type,
             )
+            # ★ 状态同步：polish/chat 会把正文改劣化，必须回退选题状态，
+            #   否则产生「topic=done 但 draft 校验不通过」的脏数据。
+            #   这是实测存在的bug（topic 13 / draft 4）。
+            sync_topic_status(db, d)
             db.commit()
             db.refresh(d)
             validation = d.validation
@@ -183,6 +188,10 @@ async def chat(payload: ChatIn, db: Session = Depends(get_db)) -> dict:
                 ai_declaration=d.ai_declaration,
                 pipeline_type=d.pipeline_type,
             )
+            # ★ 状态同步：polish/chat 会把正文改劣化，必须回退选题状态，
+            #   否则产生「topic=done 但 draft 校验不通过」的脏数据。
+            #   这是实测存在的bug（topic 13 / draft 4）。
+            sync_topic_status(db, d)
             db.commit()
             db.refresh(d)
             validation = d.validation

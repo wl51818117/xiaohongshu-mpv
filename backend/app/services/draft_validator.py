@@ -30,29 +30,55 @@ TAGS_MIN = 3
 TAGS_MAX = 5
 AI_DECLARATION_REQUIRED = True
 
-# ── 合规黑名单 ──────────────────────────────────────────
-# 站外导流是平台处罚最重的一类，单独成组
+# ── 合规分类 ────────────────────────────────────────────
+# ★★ 方向性修正（2026-10，必读）：
+#   原实现把「私信获取」「私我」「看主页」放进 TRAFFIC_WORDS 当违规。
+#   这是**过严且方向反了**——小红书 2026-09-18《交易导流违规管理细则》
+#   把监管扩到「群聊/私聊/商品信息/售后链路」，但官方给出的**合规替代写法**
+#   恰恰是「引导用户私信、看主页合集、用企业号官方电话组件，
+#   不要引导跳出平台」。
+#
+#   也就是说：站内私信是 9/18 新规后**唯一安全的主成交渠道**，
+#   而旧规则把唯一合规的路也拦掉了，等于什么都不许做。
+#
+#   所以拆成两组：
+#     CTA_ALLOWED —— 站内引导，合规，只做提示
+#     CTA_BLOCKED —— 真正违规：把人导向站外、或用谐音变体规避
 TRAFFIC_WORDS = [
-    "加微信", "加vx", "加V信", "微信号", "vx", "威信", "扣1", "扣2",
-    "私信获取", "私我", "扫码", "二维码", "加好友", "联系方式",
-    "淘宝口令", "复制打开", "看主页", "绿泡泡", "薇信",
+    # ★ 站外触点（这是真正被罚的）
+    "加微信", "加vx", "加V信", "微信号", "vx", "威信", "薇信", "绿泡泡",
+    "扣1", "扣2", "扫码", "扫二维码", "二维码",
+    "淘宝口令", "复制打开", "tb口令", "某宝",
+    "手机号", "电话联系", "加好友", "联系方式",
+    # 谐音/变体规避（平台明确「变形表达同样识别」）
+    "加v信", "v x", "V信", "扣one", "扣一", "滴我",
+    # 诱导跳出平台
+    "详情见主页", "主页有联系方式", "看主页拿",
+]
+
+# 站内引导：合规，**只提示不阻断**
+CTA_ALLOWED = [
+    "私信", "评论区", "主页", "合集", "店铺", "小黄车",
+    "关注我", "收藏", "点赞",
+]
+
+# 平台规则中点名的诱导互动句式（诱导互动 ≠ 站内引导，仍属违规）
+INDUCEMENT_WORDS = [
+    "评论区扣", "关注领", "点赞领", "转发抽奖",
+    "评论区回复领取", "扣666",
 ]
 
 # 极限词/绝对化用语
 ABSOLUTE_WORDS = [
     "全网最好", "国家级", "第一品牌", "100%有效", "永不复发",
     "绝对", "顶级", "万能", "彻底根治", "永久",
+    "最好", "最优", "最便宜", "天花板", "天花板级",
 ]
 
 # 医疗功效
 MEDICAL_WORDS = [
     "疗效", "治愈", "根治", "药到病除", "处方", "确诊",
-    "美白丸", "医美级", "瘦脸针", "减肥药",
-]
-
-# 平台规则中点名的两个高频违规句式
-INDUCEMENT_WORDS = [
-    "评论区扣", "私信我", "关注领", "点赞领",
+    "美白丸", "医美级", "医用平替", "瘦脸针", "减肥药", "消炎", "杀菌",
 ]
 
 ALL_BLOCKLIST = {
@@ -61,6 +87,43 @@ ALL_BLOCKLIST = {
     "医疗功效": MEDICAL_WORDS,
     "诱导互动": INDUCEMENT_WORDS,
 }
+
+# ── 资质宣称（需证据背书，不能一刀切禁）──────────────────
+# ★ 这些不是「敏感词」，而是「没有检测报告就不能说」的宣称。
+#   一刀切禁词会误伤——「抗菌率 99%」有 CMA 报告支撑就是合法的。
+#   所以做成**条件校验**：稿件命中了宣称，但关联商品没有对应资质 → 判不合规。
+#   （资质数据来自 Product.certs，见 models.Product）
+CREDENTIAL_CLAIMS = {
+    "抗菌": ["抗菌率", "抑菌率", "抗菌检测"],
+    "抑菌": ["抗菌率", "抑菌率", "抑菌检测"],
+    "A类": ["A类检测", "A类报告"],
+    "母婴级": ["母婴检测", "母婴报告"],
+    "孕产妇": ["孕产检测", "孕产报告"],
+    "无菌": ["无菌检测", "灭菌报告", "EO灭菌"],
+    "医用": ["医疗器械注册", "医用报告"],
+}
+
+
+def check_credential_claims(text: str, certs: list[str] | None) -> list[str]:
+    """资质宣称的条件校验。
+
+    逻辑：命中宣称 → 查 certs 里有没有能背书的检测项 → 没有则判不合规。
+    这是从「关键词黑名单」到「证据链管理」的升级：
+    有报告就大胆说并展示证据，没报告一律不说。
+    """
+    if not certs:
+        certs = []
+    joined = "、".join(certs)
+    issues: list[str] = []
+    for claim, evidences in CREDENTIAL_CLAIMS.items():
+        if claim not in text:
+            continue
+        if not any(ev in joined for ev in evidences):
+            issues.append(
+                f"宣称「{claim}」但无对应检测报告支撑"
+                f"（需 {'/'.join(evidences)} 之一）——虚假背书风险"
+            )
+    return issues
 
 
 def _count_keyword(text: str, keyword: str) -> int:
@@ -94,14 +157,17 @@ def validate_draft(
     keyword: str = "",
     ai_declaration: str = "",
     pipeline_type: str = "image",
+    certs: list[str] | None = None,
 ) -> dict:
-    """校验稿件，返回 {passed, spec_issues, compliance_issues, score}。
+    """校验稿件，返回 {passed, spec_issues, compliance_issues, cta_hints, score}。
 
     spec        规格问题（可修复的技术指标）
     compliance  合规问题（涉及违规，必须人工处理）
+    cta_hints   站内引导提示（**合规**，只是提醒确认写法）
     """
     spec: list[str] = []
     compliance: list[str] = []
+    cta_hints: list[str] = []
 
     # ── 合规：黑名单 ──
     full_text = f"{title}\n{body}\n{' '.join(tags or [])}"
@@ -110,9 +176,22 @@ def validate_draft(
         if hit:
             compliance.append(f"{category}：命中「{'、'.join(hit[:3])}」")
 
+    # ── 合规：资质宣称（条件校验，不是黑名单）──
+    for msg in check_credential_claims(full_text, certs):
+        compliance.append(f"资质宣称：{msg}")
+
     # ── 合规：AI 声明 ──
     if AI_DECLARATION_REQUIRED and not ai_declaration.strip():
         compliance.append("缺少 AI 内容声明（平台强制要求，不标识即违规）")
+
+    # ── 提示：站内引导（合规，不阻断）──
+    cta_hit = [w for w in CTA_ALLOWED if w in full_text]
+    if cta_hit:
+        cta_hints.append(
+            f"检测到站内引导「{'、'.join(cta_hit[:3])}」——"
+            f"这是小红书 9/18 新规后**唯一安全的主成交渠道**，合规。"
+            f"请确保是引导站内（私信/主页合集/店铺），而非导向站外。"
+        )
 
     # ── 规格：标题 ──
     terms = _keyword_terms(keyword)
@@ -183,6 +262,7 @@ def validate_draft(
         "passed": not spec and not compliance,
         "spec_issues": spec,
         "compliance_issues": compliance,
+        "cta_hints": cta_hints,
         "score": score,
         "stats": {
             "title_len": len(title.strip()),

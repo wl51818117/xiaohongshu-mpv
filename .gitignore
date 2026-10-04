@@ -88,3 +88,7 @@ kernel-backup-*/
 *.swp
 .DS_Store
 Thumbs.db
+
+# SQLite WAL 模式产生的临时文件
+backend/data/*.db-shm
+backend/data/*.db-wal

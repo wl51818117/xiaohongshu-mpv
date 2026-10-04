@@ -13,7 +13,8 @@ from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.staticfiles import StaticFiles
 
-from app.api import agent, agent_data, ai, analytics, assets, bridge, drafts, feeds, knowledge, pipeline, publish
+from app.api import (agent, agent_data, ai, analytics, assets, bridge, commerce,
+                     drafts, feeds, knowledge, pipeline, publish)
 from app.api import settings as settings_api
 from app.core.config import settings
 from app.db.session import init_db
@@ -40,10 +41,21 @@ app = FastAPI(
     lifespan=lifespan,
 )
 
-# CORS：仅开发期放开，生产需收紧
+# CORS：显式白名单，**不用 * + allow_credentials 的危险组合**
+# ★ 安全修复（2026-10）：
+#   原来是 `allow_origins=["*"] if debug else []` 配`allow_credentials=True`。
+#   这两个一起用等于「任意网站的 JS 都能带凭据访问本机 API」——
+#   而 /api/bridge/* 能把请求转发到带 pwsh/read/write 工具的 Agent 内核，
+#   等于把 shell 暴露给了整个互联网。debug 只应放宽日志，不应放宽来源。
+_ALLOWED_ORIGINS = [
+    "http://127.0.0.1:5173",
+    "http://localhost:5173",
+    "http://127.0.0.1:4173",  # vite preview
+    "http://localhost:4173",
+]
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["*"] if settings.debug else [],
+    allow_origins=_ALLOWED_ORIGINS,
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
@@ -72,15 +84,28 @@ app.include_router(settings_api.router)
 
 app.include_router(knowledge.router)
 
+# 商品/人群/咨询（2026-10 获客漏斗）
+app.include_router(commerce.router)
+
 
 # ── 生成的素材静态服务（封面/内页/视频）────────────────────
-# 素材在 backend/assets/ 下，_rel() 返回相对 backend 的路径（如
-# assets/images/cover_xxx.png），所以直接挂 backend 根目录，
-# 前端用 /files/assets/images/cover_xxx.png 引用。
 _BACKEND_DIR = Path(__file__).resolve().parent.parent
+# ★ 安全修复（2026-10）：
+#   原来挂的是 _BACKEND_DIR（整个后端目录），于是
+#   `/files/data/secrets.json`（API 密钥密文）与
+#   `/files/data/workbench.db`（整个数据库）都能直接 HTTP 下载。
+#   叠加 Fernet 密钥由「数据目录路径 + 机器名」派生（都是公开信息），
+#   等于任何人都能自行解密密钥。
+#   现在只挂 assets/ —— 只有生成的素材需要被前端访问。
 _ASSETS_DIR = _BACKEND_DIR / "assets"
 if _ASSETS_DIR.exists():
-    app.mount("/files", StaticFiles(directory=str(_BACKEND_DIR)), name="files")
+    app.mount("/files", StaticFiles(directory=str(_ASSETS_DIR)), name="files")
+    # 前端仍按 /files/assets/... 引用，故此处补一个 assets 前缀映射
+    app.mount(
+        "/files/assets",
+        StaticFiles(directory=str(_ASSETS_DIR)),
+        name="files-assets",
+    )
 
 
 @app.get("/", summary="服务信息")

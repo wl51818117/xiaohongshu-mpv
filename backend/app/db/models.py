@@ -93,8 +93,86 @@ class RawMaterial(Base):
     topics: Mapped[list[Topic]] = relationship(back_populates="material")
 
 
+class Product(Base):
+    """商品主数据 —— 内容生产的锚点。
+
+    ★ 为什么加这个（2026-10 审计结论）：
+      原系统的选题全部来自 RSS 新闻（充电桩、清关、BERT 词嵌入），
+      **没有一条与商品有关**。内容飘在天上，无法回答
+      「这篇内容带来的是赞藏还是订单」。
+
+      加了商品表之后，选题公式才成立：
+        选题 = Persona.concerns（人群痛点）
+             × Product.pain_points（商品解决什么麻烦）
+             × scene（场景）
+      ——问题本身就是搜索词，转化意图远高于新闻。
+
+    ★ proof_assets 是差异化地基：
+      工厂实拍（车间/质检/面料微距）是 AI 生图替代不了的东西，
+      也是同行抄不走的唯一壁垒。AI 生图做不出真车间。
+    """
+
+    __tablename__ = "products"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    sku: Mapped[str] = mapped_column(String(60), default="", index=True)
+    name: Mapped[str] = mapped_column(String(200))
+    # category: underwear 内衣 / bird 活体鸟 / other
+    category: Mapped[str] = mapped_column(String(30), default="underwear", index=True)
+    # 价格带，如「9.9-19.9/条」——决定目标人群的价格敏感度
+    price_band: Mapped[str] = mapped_column(String(60), default="")
+    unit: Mapped[str] = mapped_column(String(20), default="条")
+    # 工厂能给的硬卖点：面料成分、克重、工艺、起订量
+    selling_points: Mapped[list] = mapped_column(JSON, default=list)
+    # 这货解决什么麻烦（选题的核心输入）
+    pain_points: Mapped[list] = mapped_column(JSON, default=list)
+    # 适用场景：差旅/经期/夏季久坐/孕产/露营
+    scenes: Mapped[list] = mapped_column(JSON, default=list)
+    # ★ 可公开的资质：CMA检测报告编号/专利号/执行标准
+    #   有了它，「抗菌」这类宣称才合法（见 draft_validator.CREDENTIAL_CLAIMS）
+    certs: Mapped[list] = mapped_column(JSON, default=list)
+    # 实拍素材路径（车间/质检/包装/面料微距）——AI 生图替代不了
+    proof_assets: Mapped[list] = mapped_column(JSON, default=list)
+    # 该商品专属禁说词（叠加在全局黑名单之上）
+    taboo_words: Mapped[list] = mapped_column(JSON, default=list)
+    moq: Mapped[str] = mapped_column(String(60), default="")
+    status: Mapped[str] = mapped_column(String(20), default="on", index=True)
+    notes: Mapped[str] = mapped_column(Text, default="")
+
+    created_at: Mapped[datetime] = mapped_column(DateTime, server_default=func.now())
+    updated_at: Mapped[datetime] = mapped_column(
+        DateTime, server_default=func.now(), onupdate=func.now()
+    )
+
+
+class Persona(Base):
+    """人群卡 —— 把 Topic.persona 从字符串升级为实体。
+
+    ★ objections 单独列出来是有用的：
+      内容一多半该在**回答反对意见**，而不是赞美商品。
+      「太贵」「穿一次就破」「不敢试」「怕尺码不对」——
+      这些人关心的才是内容的选题方向。
+    """
+
+    __tablename__ = "personas"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    name: Mapped[str] = mapped_column(String(100), unique=True)
+    age_range: Mapped[str] = mapped_column(String(40), default="")
+    # life_stage: 学生/职场/孕产/中老年
+    life_stage: Mapped[str] = mapped_column(String(30), default="", index=True)
+    # 在意什么：闷、卷边、透、勒、染色、能不能反复穿
+    concerns: Mapped[list] = mapped_column(JSON, default=list)
+    # 反对什么：太贵、穿一次就破、不敢试、怕尺码不对
+    objections: Mapped[list] = mapped_column(JSON, default=list)
+    # ★ 她们自己的说法（直接来自咨询记录，是最值钱的字段）
+    own_words: Mapped[list] = mapped_column(JSON, default=list)
+
+    created_at: Mapped[datetime] = mapped_column(DateTime, server_default=func.now())
+
+
 class Topic(Base):
-    """可执行选题：AI 从素材库转换而来。"""
+    """可执行选题：AI 从素材库转换而来，或由商品×人群×场景生成。"""
 
     __tablename__ = "topics"
 
@@ -102,10 +180,33 @@ class Topic(Base):
     title: Mapped[str] = mapped_column(String(500))
     # 目标长尾词（搜索权重第一来源）
     keyword_target: Mapped[str] = mapped_column(String(200), default="", index=True)
-    # 目标人群
+    # 目标人群（保留原字符串字段，同时可关联 personas 表）
     persona: Mapped[str] = mapped_column(String(200), default="")
-    # 价值类型：情绪 / 实用 / 信息 / 经济
+    persona_id: Mapped[int | None] = mapped_column(
+        ForeignKey("personas.id", ondelete="SET NULL"), nullable=True
+    )
+    # 价值类型：情绪 / 实用 / 信息 / 经济（内容价值，非商业意图）
     value_type: Mapped[str] = mapped_column(String(20), default="实用")
+
+    # ── 商业维度（2026-10 新增）──
+    # 挂商品。资讯类选题留空。
+    product_id: Mapped[int | None] = mapped_column(
+        ForeignKey("products.id", ondelete="SET NULL"), nullable=True, index=True
+    )
+    # 场景：差旅/经期/夏季/通勤/露营/孕产
+    scene: Mapped[str] = mapped_column(String(50), default="", index=True)
+    # 一句话具体痛点（不是价值类型）
+    pain_point: Mapped[str] = mapped_column(String(300), default="")
+    # 搜索漏斗哪一段：认知 / 对比 / 决策 / 复购
+    intent_stage: Mapped[str] = mapped_column(String(20), default="", index=True)
+    # ★ 商业意图度 0-1。0=纯科普，1=直接带货。
+    #   替代 value_type 做商业排序——value_type 答「像不像好内容」，
+    #   commercial_intent 答「能不能卖货」。
+    commercial_intent: Mapped[float] = mapped_column(Float, default=0.0, index=True)
+    # 这篇内容要摆出的证据（检测报告编号/工艺/车间实拍）
+    evidence: Mapped[list] = mapped_column(JSON, default=list)
+    # 完整搜索句，如「出差三天带几条一次性内裤」
+    search_intent: Mapped[str] = mapped_column(String(300), default="")
 
     # 四条差异化规则（docs/07）：换人群/换场景/换角度/补增量
     differentiation: Mapped[list] = mapped_column(JSON, default=list)
@@ -113,6 +214,7 @@ class Topic(Base):
     status: Mapped[TopicStatus] = mapped_column(
         String(20), default=TopicStatus.POOLED, index=True
     )
+    # 综合效果分（由数据回流写入，替代原来恒为 0.0 的占位）
     score: Mapped[float] = mapped_column(Float, default=0.0)
 
     # 溯源：来自哪条素材
@@ -126,6 +228,8 @@ class Topic(Base):
 
     material: Mapped[RawMaterial | None] = relationship(back_populates="topics")
     drafts: Mapped[list[Draft]] = relationship(back_populates="topic")
+    product: Mapped[Product | None] = relationship()
+    persona_ref: Mapped[Persona | None] = relationship()
 
 
 class Draft(Base):
@@ -238,3 +342,50 @@ class MistakeLog(Base):
         DateTime, server_default=func.now(), index=True
     )
     reviewed_at: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
+
+
+class Inquiry(Base):
+    """站内咨询记录 —— 漏斗中间那一段（2026-10 新增）。
+
+    ★ 为什么必须有这张表：
+      完整漏斗是 曝光→点击→互动→**咨询**→成交→复购。
+      现有 MetricsInput 11 个字段全是流量与互动指标，
+      私信/咨询/成交**一个都没有** —— 漏斗中间整段不存在。
+
+      而「私信率」是唯一真正的购买意向信号：
+        赞藏 =「不错」，私信 =「我要买」。
+      缺了它，就无法判断哪类内容值得继续做。
+
+    ★ 注意不要加「客户手机号/微信号」字段：
+      小红书 2026-09-18 新规后站外导流是重罚项（最高扣 2 万，
+      关联账号同罪）。私域靠**站内**店铺会员 + 群聊 + 私信完成，
+      系统里存客户手机号是给自己埋雷。
+    """
+
+    __tablename__ = "inquiries"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    # 来源内容（哪篇笔记带来的咨询）
+    topic_id: Mapped[int | None] = mapped_column(
+        ForeignKey("topics.id", ondelete="SET NULL"), nullable=True, index=True
+    )
+    draft_id: Mapped[int | None] = mapped_column(
+        ForeignKey("drafts.id", ondelete="SET NULL"), nullable=True
+    )
+    product_id: Mapped[int | None] = mapped_column(
+        ForeignKey("products.id", ondelete="SET NULL"), nullable=True, index=True
+    )
+    # channel: dm 私信 / comment 评论 / profile 主页 / group 群聊
+    channel: Mapped[str] = mapped_column(String(20), default="dm", index=True)
+    # ★ 用户原话（**最有价值**）—— Persona.own_words 的来源
+    raw_text: Mapped[str] = mapped_column(Text, default="")
+    # 意图标签：尺码/价格/发货/质量/对比/售后/其他
+    intent: Mapped[str] = mapped_column(String(40), default="", index=True)
+    # stage: open 待跟进 → replied 已回复 → ordered 已成交 → lost 未成交
+    stage: Mapped[str] = mapped_column(String(20), default="open", index=True)
+    # 成交金额（stage=ordered 时填）
+    amount: Mapped[float] = mapped_column(Float, default=0.0)
+    note: Mapped[str] = mapped_column(Text, default="")
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime, server_default=func.now(), index=True
+    )

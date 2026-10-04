@@ -16,6 +16,7 @@ from __future__ import annotations
 
 import json
 import os
+import re
 from typing import Any
 
 import httpx
@@ -177,19 +178,31 @@ async def proxy(path: str, request: Request) -> Response:
         if auth.lower().startswith("bearer "):
             ticket = auth[7:].strip()
 
-    # 静态凭据回落（仅后端持有）
+    # ★ 安全修复（2026-10）：原来在这里无条件回落 _STATIC_TOKEN，
+    #   等于「浏览器不带任何票据也自动获得内核完整权限」。
+    #   而 CORS 曾是 allow_origins=["*"] + allow_credentials=True，
+    #   任意网站的 JS 都能打到这里。
+    #   现在：/v1/* 必须自带有效票据，不做静默回落。
+    #   （静态凭据仅由后端自己用，不替浏览器兜底）
     if not ticket:
-        ticket = _STATIC_TOKEN or None
+        raise HTTPException(
+            status_code=401,
+            detail="缺少票据。先调用 /api/bridge/ticket 换票，"
+            "并通过 x-harness-ticket 头传入",
+        )
+
+    # ★ 路径白名单：{path:path} 会接受任意路径（含 ..），只放行 v1/<name>
+    clean = path.lstrip("/")
+    if not re.fullmatch(r"v1/[a-z0-9\-]+", clean):
+        raise HTTPException(
+            status_code=404, detail=f"非法内核路径：{path}"
+        )
 
     client_id = request.headers.get("x-harness-client") or request.headers.get(
         "x-harness-client-id"
     )
-    incoming_auth = request.headers.get("authorization")
 
     headers = _auth_headers(ticket, client_id)
-    # 浏览器若已带静态 token（如调试），透传之
-    if not headers.get("authorization") and incoming_auth:
-        headers["authorization"] = incoming_auth
     headers["content-type"] = "application/json"
 
     # 路径拼接：SDK 的 baseUrl 是 /api/bridge，它自己会拼 /v1/xxx，
@@ -213,9 +226,13 @@ async def proxy(path: str, request: Request) -> Response:
     # SSE 端点：/chat 走流式转发（禁缓冲），否则前端收不到增量事件
     if path.endswith("chat") and request.method == "POST":
         # SSE：流式转发，禁缓冲
+        # ★ 原 bug：`client` 在此分支永不关闭—— finally 属于下面的非 SSE 分支，
+        #   而这里已经 return了。SSE 正常结束时不抛异常，aclose 不会被调到，
+        #   长期运行会泄漏连接与 fd。改为在 gen() 内部自建自销。
         async def gen():
+            sse_client = httpx.AsyncClient(timeout=settings.kernel_timeout_seconds)
             try:
-                async with client.stream(
+                async with sse_client.stream(
                     "POST", url, json=body, headers=headers
                 ) as resp:
                     if resp.status_code != 200:
@@ -226,6 +243,8 @@ async def proxy(path: str, request: Request) -> Response:
                         yield chunk
             except Exception as exc:  # noqa: BLE001
                 yield f"event: error\ndata: {json.dumps({'message': str(exc)}, ensure_ascii=False)}\n\n"
+            finally:
+                await sse_client.aclose()
 
         return StreamingResponse(
             gen(),

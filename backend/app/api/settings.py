@@ -154,9 +154,17 @@ class ProfileIn(BaseModel):
     @classmethod
     def _check_url(cls, v: str) -> str:
         u = v.strip().rstrip("/")
-        if not u.startswith(("http://", "https://")):
-            raise ValueError("地址必须以 http:// 或 https:// 开头")
-        return u
+        if not u:
+            return u
+        # ★ 安全（2026-10）：原来只判协议，于是 http://127.0.0.1:8787 与
+        #   云元数据地址都能通过，而 test 端点会把真实 API Key 发往该地址
+        #   ——等于 API Key 外泄端点+ 内网端口扫描器。
+        from app.core.url_guard import UnsafeUrl, assert_safe_url
+
+        try:
+            return assert_safe_url(u)
+        except UnsafeUrl as exc:
+            raise ValueError(f"地址不安全：{exc}") from exc
 
 
 class ActiveIn(BaseModel):
@@ -328,7 +336,31 @@ async def test_profile(profile_id: str) -> dict[str, Any]:
 
     base = prof.get("base_url", "").rstrip("/")
     key = _plain_key(prof)
+
+    # ★ SSRF 校验（2026-10）：这里会把真实 API Key 发往该地址。
+    #   保存时虽已校验过，但老数据或被绕过时仍可能存着内网地址。
+    from app.core.url_guard import UnsafeUrl, assert_safe_url
+
+    try:
+        assert_safe_url(base)
+    except UnsafeUrl as exc:
+        raise HTTPException(
+            status_code=400, detail=f"地址不安全，已拒绝请求：{exc}"
+        ) from exc
+
     provider = (prof.get("provider") or "").lower()
+
+    # ★ SSRF 校验（2026-10）：这里会把真实 API Key 发往该地址。
+    #   保存时虽已校验过，但老数据或被绕过时仍可能存着内网地址。
+    from app.core.url_guard import UnsafeUrl, assert_safe_url
+
+    try:
+        assert_safe_url(base)
+    except UnsafeUrl as exc:
+        raise HTTPException(
+            status_code=400, detail=f"地址不安全，已拒绝请求：{exc}"
+        ) from exc
+
 
     headers = {"content-type": "application/json"}
     if key:

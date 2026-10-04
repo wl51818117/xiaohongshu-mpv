@@ -13,7 +13,7 @@ from fastapi import APIRouter, Depends, HTTPException
 from pydantic import BaseModel, Field
 from sqlalchemy.orm import Session
 
-from app.db.models import RawMaterial, Topic, TopicStatus
+from app.db.models import Draft, RawMaterial, Topic, TopicStatus
 from app.db.session import get_db
 
 router = APIRouter(prefix="/api/agent/data", tags=["agent-data"])
@@ -96,18 +96,47 @@ def create_topic(payload: TopicCreate, db: Session = Depends(get_db)) -> dict:
 
 @router.patch("/topics", summary="Agent 更新选题")
 def update_topic(payload: TopicUpdate, db: Session = Depends(get_db)) -> dict:
-    """内核工具调用此接口，更新选题状态或关键词。"""
+    """内核工具调用此接口，更新选题状态或关键词。
+
+    ★ 安全修复（2026-10）：
+      原来 `TopicStatus(payload.status)` 接受任意合法枚举值直通，
+      Agent 可以把**校验不通过**的选题直接标成 done。
+      配合本文件「零鉴权」，等于流程图/看板/发布队列的状态可被任意篡改。
+      现在：置done 前必须校验其稿件的校验结果。
+    """
     topic = db.get(Topic, payload.id)
     if not topic:
         raise HTTPException(status_code=404, detail="选题不存在")
 
     if payload.status:
         try:
-            topic.status = TopicStatus(payload.status)
+            new_status = TopicStatus(payload.status)
         except ValueError:
             raise HTTPException(
                 status_code=400, detail=f"非法状态：{payload.status}"
             )
+
+        #★ 不允许绕过校验直接置 done
+        if new_status == TopicStatus.DONE:
+            draft = (
+                db.query(Draft)
+                .filter(Draft.topic_id == topic.id)
+                .order_by(Draft.updated_at.desc())
+                .first()
+            )
+            if not draft:
+                raise HTTPException(
+                    status_code=400,
+                    detail="该选题下没有稿件，不能标记为 done（应先建稿）",
+                )
+            if not (draft.validation or {}).get("passed"):
+                raise HTTPException(
+                    status_code=400,
+                    detail=f"稿件 #{draft.id} 校验未通过，不能把选题标记为 done。"
+                    "请先修复稿件（validation.spec_issues 里有具体原因）",
+                )
+        topic.status = new_status
+
     if payload.keyword_target is not None:
         topic.keyword_target = payload.keyword_target
 

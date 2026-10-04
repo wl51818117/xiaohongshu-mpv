@@ -371,11 +371,20 @@ def get_topic_context(topic_id: int, db: Session = Depends(get_db)) -> dict:
 
 @router.post("/generate-copy", summary="AI 生成正文")
 async def generate_copy(payload: GenerateCopyIn, db: Session = Depends(get_db)) -> dict:
-    """按选题上下文生成正文初稿。
+    """按选题上下文生成正文**与标签**，并同步选题状态。
 
-    ★ 走内核（Agent 编排），让模型带着写作简报生成。
-      内核不可用时返回明确错误，不静默失败。
+    ★ 2026-10 修复三处：
+      1. **标签回写** —— 原来只生成正文，`draft.tags` 保持空列表，
+         而 `TAGS_MIN=3` 是硬指标，所以这条**主路径 100% 产出
+         校验不通过的稿件**（库里 4 篇稿件全挂的直接原因）。
+      2. **统一出口** —— 原来自己拼 headers 调内核，漏了
+         `x-harness-app` 与统一凭据管理，会再酿 401。
+      3. **状态同步** —— 改用 `sync_topic_status()` 单一函数，
+         避免「改坏正文却不回退选题状态」的脏数据。
     """
+    from app.services import ai_writer
+    from app.services.topic_state import sync_topic_status
+
     draft = db.get(Draft, payload.draft_id)
     if not draft:
         raise HTTPException(status_code=404, detail="稿件不存在")
@@ -389,90 +398,82 @@ async def generate_copy(payload: GenerateCopyIn, db: Session = Depends(get_db)) 
         raise HTTPException(status_code=404, detail="选题不存在")
 
     brief = ctx.get("writing_brief", "")
+    keyword = ctx.get("keyword_target", "")
+
+    # ── 前置闸：关键词为空就别硬生成 ──
+    # 没有关键词的稿件必然校验不过，生成它只是浪费一次模型调用。
+    if not keyword:
+        raise HTTPException(
+            status_code=400,
+            detail="该选题没有长尾词，无法生成正文。"
+            "请先在选题库填写关键词（空关键词生成的稿件无法通过校验）",
+        )
+
     prompt = (
         f"你现在扮演小红书爆款文案写手。只输出正文本身，"
         f"不要输出任何思考过程、说明、解释或 markdown 标记。\n\n"
         f"选题：{ctx.get('title')}\n"
-        f"目标长尾词：{ctx.get('keyword_target', '')}\n"
+        f"目标长尾词：{keyword}\n"
         f"目标人群：{ctx.get('persona') or '不限'}\n\n"
         f"写作要求：\n{brief}\n\n"
         f"再次强调输出规则：\n"
         f"1. **只输出正文**，第一句话就是正文开头\n"
         f"2. **必须用中文**\n"
         f"3. 长度 {draft_validator.BODY_MIN}-{draft_validator.BODY_MAX} 个汉字\n"
-        f"4. 关键词「{ctx.get('keyword_target', '')}」必须出现在**前 80 字内**\n"
+        f"4. 关键词「{keyword}」必须出现在**前 80 字内**\n"
         f"5. 不要写「好的」「以下是」「希望对你有帮助」这类开场白\n"
-        f"6. 禁止出现微信/电话/二维码等导流信息与极限词\n"
+        f"6. 禁止出现微信/电话/二维码等站外导流信息与极限词"
     )
 
-    # 经后端转发到内核（绝不浏览器直连内核）
-    # ★ 内核自 hbridge v2.1 起要求鉴权：需带票据或静态凭据，
-    #   否则一律 401。这里复用设置中保存的 API Key。
-    headers = {"content-type": "application/json"}
-    api_key = _stored_api_key()
-    if api_key:
-        headers["authorization"] = f"Bearer {api_key}"
-
+    # ① 正文 —— 走统一出口（自动带鉴权头 + 注入历史经验）
     try:
-        async with httpx.AsyncClient(timeout=180) as client:
-            resp = await client.post(
-                f"{settings.kernel_base_url}/v1/chat",
-                json={"text": prompt, "sessionId": f"draft-{draft.id}"},
-                headers=headers,
-            )
+        body = await ai_writer.ask(prompt, session=f"draft-{draft.id}")
     except Exception as exc:  # noqa: BLE001
-        raise HTTPException(
-            status_code=502,
-            detail=f"内核不可达（{settings.kernel_base_url}）：{exc}。"
-            f"请先启动提取harness/start-all.cmd",
-        ) from exc
+        raise HTTPException(status_code=502, detail=f"生成正文失败：{exc}") from exc
 
-    if resp.status_code != 200:
-        raise HTTPException(
-            status_code=502, detail=f"内核返回 {resp.status_code}：{resp.text[:160]}"
-        )
-
-    # 解析 SSE，取正文文本
-    text_parts: list[str] = []
-    for line in resp.text.splitlines():
-        if not line.startswith("data:"):
-            continue
-        raw = line[5:].strip()
-        if not raw:
-            continue
-        try:
-            payload_obj = json.loads(raw)
-        except json.JSONDecodeError:
-            continue
-        t = payload_obj.get("text")
-        if isinstance(t, str):
-            text_parts.append(t)
-
-    body = _clean_copy("".join(text_parts))
     if not body:
         raise HTTPException(status_code=502, detail="内核未返回可用正文")
 
-    # 落库 + 重跑校验
+    # ② 标签 —— ★ 本次修复的关键
+    tags: list[str] = list(draft.tags or [])
+    if not tags:
+        try:
+            raw_tags = await ai_writer.gen_tags(
+                title=draft.title or ctx.get("title", ""),
+                body=body,
+                persona=ctx.get("persona", ""),
+                session=f"draft-{draft.id}",
+            )
+            # gen_tags 要求 5-8 个，但校验器上限 5 —— 必须截断
+            tags = [t for t in raw_tags if t][: draft_validator.TAGS_MAX]
+        except Exception:  # noqa: BLE001
+            tags = []
+
+    # ③ 落库 + 重跑校验 + 同步状态
     draft.body = body
+    draft.tags = tags
     draft.validation = draft_validator.validate_draft(
         title=draft.title,
         body=body,
-        tags=draft.tags,
-        keyword=ctx.get("keyword_target", ""),
+        tags=tags,
+        keyword=keyword,
         ai_declaration=draft.ai_declaration,
         pipeline_type=draft.pipeline_type,
     )
-    if draft.validation["passed"] and draft.topic:
-        draft.topic.status = TopicStatus.DONE
+    sync_topic_status(db, draft)
     db.commit()
     db.refresh(draft)
 
-    return {
+    result: dict = {
         "ok": True,
         "draft_id": draft.id,
         "body": body,
+        "tags": tags,
         "validation": draft.validation,
     }
+    if not tags:
+        result["warning"] = "标签自动生成失败，请手动补 3-5 个（否则无法通过校验）"
+    return result
 
 
 def _draft_brief(draft: Draft) -> dict:

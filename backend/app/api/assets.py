@@ -266,6 +266,14 @@ def save_provider(cfg: ProviderIn) -> dict:
             )
         if not base.startswith(("http://", "https://")):
             raise HTTPException(status_code=400, detail="地址必须以 http:// 或 https:// 开头")
+        # ★ 安全（2026-10）：防 SSRF。测试端点会把 Bearer 凭据发往该地址，
+        #   未校验时等于 API Key 外泄端点。
+        from app.core.url_guard import UnsafeUrl, assert_safe_url
+
+        try:
+            assert_safe_url(base)
+        except UnsafeUrl as exc:
+            raise HTTPException(status_code=400, detail=f"地址不安全：{exc}") from exc
 
     data = {
         "base_url": base,
@@ -309,6 +317,19 @@ def test_provider(cfg: ProviderTestIn) -> dict:
                 "message": "地址与密钥都不能为空"}
 
     base = cfg.base_url.strip().rstrip("/")
+
+    # ★ SSRF 校验（2026-10）：test端点会拿 Bearer 凭据去打这个地址，
+    #   未校验时等于「API Key 外泄端点 + 内网端口扫描器」
+    #   （test 会区分 unreachable/auth_failed/timeout，是现成的 oracle）。
+    #   注意：保存时的校验在 save_provider，这里是**独立端点，必须再校验一次**。
+    from app.core.url_guard import UnsafeUrl, assert_safe_url
+
+    try:
+        assert_safe_url(base)
+    except UnsafeUrl as exc:
+        return {"ok": False, "status": "unsafe_url", "ms": 0,
+                "message": f"地址不安全，已拒绝请求：{exc}"}
+
     model = (cfg.model or "").strip() or "black-forest-labs/FLUX.1-schnell"
     size = cfg.size or "1080x1440"
     payload: dict = {"model": model, "prompt": "一朵云", "n": 1}

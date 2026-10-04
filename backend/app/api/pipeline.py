@@ -6,7 +6,7 @@ MVP 只实现这一条最小可运行主流程（剥离素材生成、发布等�
 from __future__ import annotations
 
 from fastapi import APIRouter, Depends, HTTPException, Query
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, field_validator
 from sqlalchemy import func
 from sqlalchemy.orm import Session
 
@@ -24,6 +24,18 @@ class FeedIn(BaseModel):
     name: str = Field(..., examples=["机器之心"])
     url: str = Field(..., examples=["https://www.jiqizhixin.com/rss"])
     category: str = "综合"
+
+    @field_validator("url")
+    @classmethod
+    def _check_url(cls, v: str) -> str:
+        """★ 安全（2026-10）：RSS URL 由服务端抓取，原来无任何校验，
+        可打内网/元数据服务（SSRF）。"""
+        from app.core.url_guard import UnsafeUrl, assert_safe_url
+
+        try:
+            return assert_safe_url(v)
+        except UnsafeUrl as exc:
+            raise ValueError(f"RSS 地址不安全：{exc}") from exc
 
 
 class CollectRequest(BaseModel):
@@ -108,9 +120,42 @@ def collect_rss(req: CollectRequest, db: Session = Depends(get_db)) -> dict:
 
 
 @router.post("/pipeline/convert", summary="环节二：素材转选题")
-def convert_topics(limit: int = Query(20, ge=1, le=100), db: Session = Depends(get_db)):
-    """把素材经合规过筛后转成可执行选题。"""
-    return {"ok": True, **topic_converter.convert_pending(db, limit=limit)}
+async def convert_topics(
+    limit: int = Query(20, ge=1, le=100),
+    extract_keyword: bool = Query(True, description="是否用 AI 抽取长尾词"),
+    db: Session = Depends(get_db),
+) -> dict:
+    """把素材经合规过筛后转成可执行选题。
+
+    ★ 关键词改由 AI 抽取（2026-10）：正则切不出词，会产出
+      「月广州海关监」这类滑窗碎片，进而污染稿件标题、写作简报、
+      校验器整条链路。AI 不可用时宁可留空待人工填。
+    """
+    keywords: dict[int, str] = {}
+    ai_failed = 0
+
+    if extract_keyword:
+        # 先取待转换素材（与 service 内部同条件）
+        materials = (
+            db.query(RawMaterial)
+            .filter(~RawMaterial.topics.any())
+            .order_by(RawMaterial.fetched_at.desc())
+            .limit(limit)
+            .all()
+        )
+        for m in materials:
+            try:
+                keywords[m.id] = await topic_converter.ai_keyword(m.title, m.summary)
+            except Exception:  # noqa: BLE001
+                ai_failed += 1
+
+    result = topic_converter.convert_pending(db, limit=limit, keywords=keywords)
+    if ai_failed:
+        result["ai_failed"] = ai_failed
+        result["note"] = (
+            f"{ai_failed} 条素材的长尾词抽取失败，关键词留空需人工填写"
+        )
+    return {"ok": True, **result}
 
 
 @router.get("/topics", summary="选题库列表")
