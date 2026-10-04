@@ -47,8 +47,16 @@ export type Material = {
   has_topic: boolean
 }
 
+export type FeedPreset = {
+  key: string
+  label: string
+  desc: string
+  count: number
+}
+
 export type CollectResult = {
   ok: boolean
+  preset?: string | null
   fetched: number
   added: number
   duplicated: number
@@ -119,11 +127,15 @@ export type DraftListItem = {
 export const api = {
   status: () => request<PipelineStatus>('/pipeline/status'),
 
-  collect: (limitPerFeed = 3) =>
+  collect: (limitPerFeed = 3, preset?: string) =>
     request<CollectResult>('/pipeline/collect', {
       method: 'POST',
-      body: JSON.stringify({ limit_per_feed: limitPerFeed }),
+      body: JSON.stringify({ limit_per_feed: limitPerFeed, preset }),
     }),
+
+  /** 赛道预设列表（换赛道改 backend/data/feeds.json，不用改代码）*/
+  feeds: () =>
+    request<{ presets: FeedPreset[] }>('/pipeline/feeds'),
 
   convert: (limit = 20) =>
     request<ConvertResult>(`/pipeline/convert?limit=${limit}`, { method: 'POST' }),

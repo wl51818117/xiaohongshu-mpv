@@ -256,5 +256,7 @@ export async function connectWorkbench(
   }
 
   await bridge.whenSynced()
+  // 暴露给调试/自动化脚本：便于验证「内核推回调用 → 界面真的变了」
+  ;(window as unknown as Record<string, unknown>).__workbenchBridge = bridge
   return bridge
 }

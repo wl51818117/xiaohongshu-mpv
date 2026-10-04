@@ -3,6 +3,7 @@ import {
   api,
   type ConvertResult,
   type CollectResult,
+  type FeedPreset,
   type KernelStatus,
   type Material,
   type PipelineStatus,
@@ -86,6 +87,8 @@ export default function App() {
     keyword?: string
   }>({})
   const [selectedTopicId, setSelectedTopicId] = useState<number | null>(null)
+  const [presets, setPresets] = useState<FeedPreset[]>([])
+  const [presetKey, setPresetKey] = useState<string>('')
 
   // 窄屏时默认收起，避免一进来就被浮层挡住主内容
   useEffect(() => {
@@ -173,6 +176,10 @@ export default function App() {
   useEffect(() => {
     refresh()
     api.kernel().then(setKernel).catch(() => setKernel({ ok: false }))
+    api.feeds().then((r) => {
+      setPresets(r.presets)
+      setPresetKey((k) => k || r.presets[0]?.key || '')
+    }).catch(() => setPresets([]))
   }, [refresh])
 
   const notify = (kind: 'ok' | 'err', msg: string) => {
@@ -201,7 +208,7 @@ export default function App() {
   const runCollect = async (limit: number) => {
     setBusy('collect')
     try {
-      const r: CollectResult = await api.collect(limit)
+      const r: CollectResult = await api.collect(limit, presetKey || undefined)
       const total = r.per_feed.reduce((a, b) => a + b.added, 0)
       notify(
         'ok',
@@ -238,7 +245,7 @@ export default function App() {
   const runAll = async () => {
     setBusy('all')
     try {
-      const c = await api.collect(3)
+      const c = await api.collect(3, presetKey || undefined)
       const v = await api.convert(20)
       notify(
         'ok',
@@ -706,7 +713,33 @@ export default function App() {
                   ))}
                 </ol>
 
-                <div className="mt-6 flex flex-wrap gap-2 border-t border-stone-200 pt-4">
+                <div className="mt-5">
+                  <label className="field-label">赛道预设</label>
+                  <div className="flex flex-wrap items-center gap-2">
+                    <select
+                      value={presetKey}
+                      onChange={(e) => setPresetKey(e.target.value)}
+                      className="field !w-auto !min-w-[200px]"
+                      aria-label="选择赛道预设"
+                    >
+                      {presets.map((p) => (
+                        <option key={p.key} value={p.key}>
+                          {p.label}（{p.count} 源）
+                        </option>
+                      ))}
+                    </select>
+                    {presetKey && (
+                      <span className="text-xs text-stone-400">
+                        {presets.find((p) => p.key === presetKey)?.desc}
+                      </span>
+                    )}
+                  </div>
+                  <p className="mt-1.5 text-[11px] text-stone-400">
+                    换赛道只需改 backend/data/feeds.json，不用动代码。
+                  </p>
+                </div>
+
+                <div className="mt-5 flex flex-wrap gap-2 border-t border-stone-200 pt-4">
                   <button
                     className="btn-ghost"
                     disabled={busy !== null}
