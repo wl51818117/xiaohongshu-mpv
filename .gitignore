@@ -27,6 +27,9 @@ dist-electron/
 data/*
 !data/.gitkeep
 !data/feeds.json
+# ★ 密钥文件（API Key 等），绝不入库
+backend/data/secrets.json
+backend/data/preferences.json
 volumes/
 *.log
 
