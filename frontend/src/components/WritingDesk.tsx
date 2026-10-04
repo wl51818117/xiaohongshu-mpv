@@ -2,6 +2,22 @@ import { useCallback, useEffect, useState } from 'react'
 import { type Draft, type Validation } from '../lib/api'
 import { DiffBadge, EmptyState, SectionTitle, Tag, ValueTypeBadge } from './ui'
 
+/** 打磨动作标签（与后端 POLISH_ACTIONS 对应）*/
+const POLISH_LABELS: Record<string, string> = {
+  humanize: '去 AI 味',
+  polish: '润色',
+  shorten: '精简',
+  expand: '扩写',
+  hook: '改开头',
+}
+const POLISH_ACTIONS = [
+  { key: 'humanize', label: '去 AI 味' },
+  { key: 'polish', label: '润色' },
+  { key: 'hook', label: '改开头' },
+  { key: 'shorten', label: '精简' },
+  { key: 'expand', label: '扩写' },
+]
+
 type TopicContext = {
   topic_id: number
   title: string
@@ -41,6 +57,11 @@ export function WritingDesk({
   const [tagsText, setTagsText] = useState('')
   const [busy, setBusy] = useState<string | null>(null)
   const [validation, setValidation] = useState<Validation | null>(null)
+  // AI 能力
+  const [titleOptions, setTitleOptions] = useState<string[]>([])
+  const [tagOptions, setTagOptions] = useState<string[]>([])
+  const [chatInput, setChatInput] = useState('')
+  const [chatLog, setChatLog] = useState<{ role: 'user' | 'ai'; text: string }[]>([])
 
   const load = useCallback(async () => {
     if (!topicId) return
@@ -120,6 +141,105 @@ export function WritingDesk({
       onNotify('err', `保存失败：${(e as Error).message}`)
     } finally {
       setBusy(null)
+    }
+  }
+
+
+  /** AI 批量出 10 个爆款标题，用户挑选。 */
+  const genTitles = async () => {
+    if (!ctx) return
+    setBusy('titles')
+    try {
+      const r = await fetch('/api/ai/titles', {
+        method: 'POST',
+        headers: { 'content-type': 'application/json' },
+        body: JSON.stringify({
+          topic: ctx.title,
+          keyword: ctx.keyword_target,
+          persona: ctx.persona,
+          value_type: ctx.value_type,
+          n: 10,
+        }),
+      }).then((x) => x.json())
+      if (r.titles?.length) {
+        setTitleOptions(r.titles)
+        onNotify('ok', `已生成 ${r.count} 个标题候选，点一个即可采用`)
+      } else {
+        onNotify('err', '未生成出标题，请重试')
+      }
+    } catch (e) {
+      onNotify('err', `生成标题失败：${(e as Error).message}`)
+    } finally {
+      setBusy('')
+    }
+  }
+
+  /** 智能标签推荐。 */
+  const genTags = async () => {
+    setBusy('tags')
+    try {
+      const r = await fetch('/api/ai/tags', {
+        method: 'POST',
+        headers: { 'content-type': 'application/json' },
+        body: JSON.stringify({ title, body, persona: ctx?.persona || '' }),
+      }).then((x) => x.json())
+      if (r.tags?.length) {
+        setTagOptions(r.tags)
+        onNotify('ok', `推荐 ${r.count} 个标签，点一下加入`)
+      } else {
+        onNotify('err', '未获取到标签建议')
+      }
+    } catch (e) {
+      onNotify('err', `标签推荐失败：${(e as Error).message}`)
+    } finally {
+      setBusy('')
+    }
+  }
+
+  /** 单次打磨：去AI味 / 润色 / 精简 / 扩写 / 改开头。 */
+  const polish = async (action: string) => {
+    setBusy(action)
+    try {
+      const r = await fetch('/api/ai/polish', {
+        method: 'POST',
+        headers: { 'content-type': 'application/json' },
+        body: JSON.stringify({ body, action, keyword: ctx?.keyword_target || '' }),
+      }).then((x) => x.json())
+      if (r.body) {
+        setBody(r.body)
+        if (r.validation) setValidation(r.validation)
+        onNotify('ok', `${POLISH_LABELS[action] || '打磨'}完成（${r.body.length} 字）`)
+      }
+    } catch (e) {
+      onNotify('err', `打磨失败：${(e as Error).message}`)
+    } finally {
+      setBusy('')
+    }
+  }
+
+  /** 多轮对话打磨。 */
+  const sendChat = async () => {
+    const msg = chatInput.trim()
+    if (!msg || !body) return
+    setChatInput('')
+    setChatLog((l) => [...l, { role: 'user', text: msg }])
+    setBusy('chat')
+    try {
+      const r = await fetch('/api/ai/chat', {
+        method: 'POST',
+        headers: { 'content-type': 'application/json' },
+        body: JSON.stringify({ body, message: msg, keyword: ctx?.keyword_target || '' }),
+      }).then((x) => x.json())
+      if (r.body) {
+        setBody(r.body)
+        if (r.validation) setValidation(r.validation)
+        setChatLog((l) => [...l, { role: 'ai', text: `已按要求改（${r.body.length} 字）` }])
+      }
+    } catch (e) {
+      onNotify('err', `对话失败：${(e as Error).message}`)
+      setChatLog((l) => [...l, { role: 'ai', text: `失败：${(e as Error).message}` }])
+    } finally {
+      setBusy('')
     }
   }
 
@@ -227,12 +347,63 @@ export function WritingDesk({
                 {title.length}/20
               </span>
             </div>
-            <input
-              value={title}
-              onChange={(e) => setTitle(e.target.value)}
-              className="field mb-4"
-              placeholder="≤20 字，长尾词放前 8-13 字"
-            />
+            <div className="mb-2 flex gap-2">
+              <input
+                value={title}
+                onChange={(e) => setTitle(e.target.value)}
+                className="field flex-1"
+                placeholder="≤20 字，长尾词放前 8-13 字"
+              />
+              <button
+                className="btn-accent shrink-0"
+                disabled={busy !== null}
+                onClick={() => void genTitles()}
+              >
+                {busy === 'titles' ? '生成中…' : 'AI 出 10 个标题'}
+              </button>
+            </div>
+
+            {/* 标题候选：用户自己挑 */}
+            {titleOptions.length > 0 && (
+              <div className="mb-4 rounded-lg bg-zinc-50 p-2.5 dark:bg-zinc-800/60">
+                <div className="mb-1.5 flex items-center justify-between">
+                  <span className="text-[11px] font-medium text-stone-500">
+                    标题候选（点一个采用）
+                  </span>
+                  <button
+                    className="btn-ghost !px-1.5 !py-0.5 !text-[10px]"
+                    onClick={() => setTitleOptions([])}
+                  >
+                    收起
+                  </button>
+                </div>
+                <div className="grid gap-1">
+                  {titleOptions.map((t, i) => (
+                    <button
+                      key={i}
+                      onClick={() => {
+                        setTitle(t)
+                        setTitleOptions([])
+                        onNotify('ok', '已采用该标题')
+                      }}
+                      className={`flex items-center gap-2 rounded-lg px-2.5 py-1.5 text-left text-xs transition-colors ${
+                        t === title
+                          ? 'bg-orange-100 font-medium text-orange-800 dark:bg-orange-500/20 dark:text-orange-200'
+                          : 'text-stone-700 hover:bg-stone-200 dark:text-stone-200 dark:hover:bg-zinc-700'
+                      }`}
+                    >
+                      <span className="shrink-0 text-[10px] text-stone-400">
+                        {i + 1}
+                      </span>
+                      <span className="truncate">{t}</span>
+                      <span className="ml-auto shrink-0 text-[10px] text-stone-400">
+                        {t.length}字
+                      </span>
+                    </button>
+                  ))}
+                </div>
+              </div>
+            )}
 
             <div className="mb-3 flex items-center justify-between">
               <label className="field-label !mb-0">正文</label>
@@ -246,10 +417,27 @@ export function WritingDesk({
                 {bodyLen}/300-800
               </span>
             </div>
+            {/* 打磨工具条：AI 多轮修改 */}
+            {body && (
+              <div className="mb-2 flex flex-wrap items-center gap-1.5">
+                <span className="text-[11px] text-stone-400">AI 打磨：</span>
+                {POLISH_ACTIONS.map((a) => (
+                  <button
+                    key={a.key}
+                    className="btn-ghost !min-h-[26px] !px-2 !py-0.5 !text-[11px]"
+                    disabled={busy !== null}
+                    onClick={() => void polish(a.key)}
+                  >
+                    {busy === a.key ? '处理中…' : a.label}
+                  </button>
+                ))}
+              </div>
+            )}
+
             <textarea
               value={body}
               onChange={(e) => setBody(e.target.value)}
-              rows={16}
+              rows={14}
               placeholder={
                 body
                   ? ''
@@ -259,15 +447,109 @@ export function WritingDesk({
             />
 
             <div className="mt-4">
-              <label className="field-label">标签（顿号分隔，3-5 个）</label>
+              <div className="mb-1.5 flex items-center justify-between">
+                <label className="field-label !mb-0">标签（3-5 个）</label>
+                <button
+                  className="btn-accent !min-h-[26px] !px-2 !py-0.5 !text-[11px]"
+                  disabled={busy !== null}
+                  onClick={() => void genTags()}
+                >
+                  {busy === 'tags' ? '推荐中…' : '智能推荐标签'}
+                </button>
+              </div>
               <input
                 value={tagsText}
                 onChange={(e) => setTagsText(e.target.value)}
                 className="field"
                 placeholder="穿搭、通勤、上班族"
               />
+
+              {/* 标签候选：点一下加入 */}
+              {tagOptions.length > 0 && (
+                <div className="mt-2 flex flex-wrap gap-1.5">
+                  {tagOptions.map((t) => {
+                    const has = tagsText
+                      .split(/[、,，\s]+/)
+                      .includes(t)
+                    return (
+                      <button
+                        key={t}
+                        onClick={() => {
+                          const cur = tagsText.split(/[、,，\s]+/).filter(Boolean)
+                          const next = has
+                            ? cur.filter((x) => x !== t)
+                            : [...cur, t]
+                          setTagsText(next.join('、'))
+                        }}
+                        className={`tag transition-colors ${
+                          has
+                            ? 'bg-orange-100 text-orange-800 dark:bg-orange-500/25 dark:text-orange-200'
+                            : 'bg-stone-100 text-stone-600 hover:bg-stone-200 dark:bg-zinc-800 dark:text-zinc-300 dark:hover:bg-zinc-700'
+                        }`}
+                      >
+                        {t}
+                        {has ? ' ✓' : ' +'}
+                      </button>
+                    )
+                  })}
+                </div>
+              )}
             </div>
           </div>
+
+          {/* 多轮打磨对话 */}
+          {body && (
+            <div className="card p-4">
+              <div className="mb-2 flex items-center gap-2">
+                <span className="text-xs font-medium text-stone-600 dark:text-stone-300">
+                  多轮打磨
+                </span>
+                <span className="text-[11px] text-stone-400">
+                  试：「再口语一点」「换个开头」「加一段真实经历」
+                </span>
+              </div>
+
+              {chatLog.length > 0 && (
+                <div className="mb-2 max-h-32 space-y-1.5 overflow-y-auto">
+                  {chatLog.map((m, i) => (
+                    <div
+                      key={i}
+                      className={`text-xs ${
+                        m.role === 'user' ? 'text-stone-600' : 'text-emerald-700'
+                      }`}
+                    >
+                      <span className="font-medium">
+                        {m.role === 'user' ? '你：' : 'AI：'}
+                      </span>
+                      {m.text}
+                    </div>
+                  ))}
+                </div>
+              )}
+
+              <div className="flex gap-2">
+                <input
+                  value={chatInput}
+                  onChange={(e) => setChatInput(e.target.value)}
+                  onKeyDown={(e) => {
+                    if (e.key === 'Enter' && !e.shiftKey) {
+                      e.preventDefault()
+                      void sendChat()
+                    }
+                  }}
+                  placeholder="告诉 AI 想怎么改…"
+                  className="field flex-1 !min-h-[34px] !py-1.5 !text-xs"
+                />
+                <button
+                  className="btn-primary shrink-0 !min-h-[34px] !px-3 !py-1.5 !text-xs"
+                  disabled={busy !== null || !chatInput.trim()}
+                  onClick={() => void sendChat()}
+                >
+                  {busy === 'chat' ? '处理中' : '发送'}
+                </button>
+              </div>
+            </div>
+          )}
 
           {/* 校验面板 */}
           {validation && (

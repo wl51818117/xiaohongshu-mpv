@@ -196,6 +196,53 @@ export default function App() {
   }, [readView])
 
 
+
+  /** 素材库：把一条素材直接转成选题。 */
+  const addMaterialToTopic = async (m: Material) => {
+    setBusy(`mat-${m.id}`)
+    try {
+      const r = await fetch(`/api/pipeline/materials/${m.id}/to-topic`, {
+        method: 'POST',
+        headers: { 'content-type': 'application/json' },
+        body: JSON.stringify({ material_id: m.id }),
+      }).then((x) => x.json())
+      if (r.created) {
+        notify('ok', `已加入选题库 #${r.id}：${(r.title || '').slice(0, 24)}`)
+      } else {
+        notify('err', '该素材已在选题库中，未重复创建')
+      }
+      void refresh()
+    } catch (e) {
+      notify('err', `加入选题失败：${(e as Error).message}`)
+    } finally {
+      setBusy(null)
+    }
+  }
+
+  /** 选题库：删除选题。 */
+  const removeTopic = async (t: Topic) => {
+    if (!confirm(`确定删除选题「${t.title.slice(0, 20)}」？\n\n若该选题已有稿件，会一并删除。`)) {
+      return
+    }
+    setBusy(`del-${t.id}`)
+    try {
+      const r = await fetch(`/api/pipeline/topics/${t.id}`, {
+        method: 'DELETE',
+      }).then((x) => x.json())
+      notify(
+        'ok',
+        r.deleted_drafts > 0
+          ? `已删除选题及其 ${r.deleted_drafts} 篇稿件`
+          : '已删除选题',
+      )
+      void refresh()
+    } catch (e) {
+      notify('err', `删除失败：${(e as Error).message}`)
+    } finally {
+      setBusy(null)
+    }
+  }
+
   /** 从选题转稿件并进入写作台。
    *
    * 流程修正（王哥指出）：稿件不是独立页，必须从选题派生。
@@ -785,13 +832,31 @@ export default function App() {
                             {t.source_name && <span>来源：{t.source_name}</span>}
                           </div>
                         </div>
-                        <button
-                          className="btn-primary shrink-0 !px-3 !py-1.5 !text-xs"
-                          disabled={busy !== null}
-                          onClick={() => void startDraftFromTopic(t)}
-                        >
-                          {busy === `draft-${t.id}` ? '转稿中…' : '写稿'}
-                        </button>
+                        <div className="flex shrink-0 flex-col gap-1">
+                          <div className="flex gap-1">
+                            <button
+                              className="btn-primary !px-2.5 !py-1 !text-xs"
+                              disabled={busy !== null}
+                              onClick={() => void startDraftFromTopic(t)}
+                            >
+                              {busy === `draft-${t.id}` ? '转稿中' : '写稿'}
+                            </button>
+                            <button
+                              className="btn-ghost !px-2 !py-1 !text-xs !text-red-500"
+                              disabled={busy !== null}
+                              onClick={() => void removeTopic(t)}
+                              aria-label={`删除选题 ${t.title}`}
+                              title="删除该选题"
+                            >
+                              删
+                            </button>
+                          </div>
+                          {selectedTopicId === t.id && (
+                            <span className="text-center text-[10px] text-orange-600">
+                              当前
+                            </span>
+                          )}
+                        </div>
                       </div>
                     </div>
                   ))}
@@ -837,6 +902,13 @@ export default function App() {
                       >
                         {m.has_topic ? '已转选题' : '待转换'}
                       </span>
+                      <button
+                        className="btn-primary shrink-0 !px-2.5 !py-1 !text-xs"
+                        disabled={busy !== null}
+                        onClick={() => void addMaterialToTopic(m)}
+                      >
+                        {busy === `mat-${m.id}` ? '处理中' : '加入选题'}
+                      </button>
                     </div>
                   ))}
                 </div>
