@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useMemo, useState } from 'react'
-import { Tag } from './ui'
+import { Button, Tag } from './ui'
 
 /** API 配置与模型管理（对应需求 1-5）。 */
 
@@ -243,9 +243,9 @@ export function ApiProfiles({
             {editing ? '编辑配置' : '新建配置'}
           </span>
           {editing && (
-            <button className="btn-ghost !px-2 !py-0.5 !text-[11px]" onClick={resetForm}>
+            <Button variant="ghost" size="xs" onClick={resetForm}>
               取消
-            </button>
+            </Button>
           )}
         </div>
 
@@ -283,13 +283,14 @@ export function ApiProfiles({
               autoComplete="off"
               className="field !min-h-[32px] !flex-1 !py-1.5 !font-mono !text-[11px]"
             />
-            <button
-              className="btn-primary !min-h-[32px] !px-3 !py-1.5 !text-xs"
-              disabled={busy === 'save'}
+            <Button
+              variant="primary"
+              size="sm"
+              loading={busy === 'save'}
               onClick={() => void save()}
             >
-              {busy === 'save' ? '保存中' : editing ? '保存修改' : '添加配置'}
-            </button>
+              {editing ? '保存修改' : '添加配置'}
+            </Button>
           </div>
         </div>
 
@@ -363,36 +364,37 @@ export function ApiProfiles({
                   {/* 操作 */}
                   <div className="flex shrink-0 flex-col items-end gap-1.5">
                     <div className="flex gap-1">
-                      <button
-                        className="btn-ghost !min-h-[26px] !px-2 !py-0.5 !text-[11px]"
-                        disabled={busy === `test-${p.id}`}
+                      <Button
+                        variant="default"
+                        size="xs"
+                        loading={busy === `test-${p.id}`}
                         onClick={() => void test(p.id)}
                       >
-                        {busy === `test-${p.id}` ? '测试中…' : '测试连接'}
-                      </button>
-                      <button
-                        className="btn-ghost !min-h-[26px] !px-2 !py-0.5 !text-[11px]"
-                        disabled={loadingModels === p.id}
+                        测试连接
+                      </Button>
+                      <Button
+                        variant="default"
+                        size="xs"
+                        loading={loadingModels === p.id}
                         onClick={() => void loadModels(p.id)}
                       >
-                        {loadingModels === p.id
-                          ? '拉取中…'
-                          : modelsOpen === p.id
-                            ? '收起'
-                            : '模型列表'}
-                      </button>
+                        {modelsOpen === p.id ? '收起' : '模型列表'}
+                      </Button>
                     </div>
                     <div className="flex gap-1">
-                      <button
-                        className="btn-ghost !min-h-[26px] !px-2 !py-0.5 !text-[11px]"
+                      <Button
+                        variant="default"
+                        size="xs"
                         onClick={() => startEdit(p)}
                       >
                         编辑
-                      </button>
+                      </Button>
                       {!isActive && (
-                        <button
-                          className="btn-primary !min-h-[26px] !px-2 !py-0.5 !text-[11px]"
-                          disabled={!p.tested || busy === `active-${p.id}`}
+                        <Button
+                          variant="primary"
+                          size="xs"
+                          loading={busy === `active-${p.id}`}
+                          disabled={!p.tested}
                           title={
                             p.tested
                               ? '设为生效配置'
@@ -401,15 +403,16 @@ export function ApiProfiles({
                           onClick={() => void activate(p.id)}
                         >
                           设为生效
-                        </button>
+                        </Button>
                       )}
-                      <button
-                        className="btn-ghost !min-h-[26px] !px-2 !py-0.5 !text-[11px] !text-red-500"
-                        disabled={busy === `del-${p.id}`}
+                      <Button
+                        variant="danger"
+                        size="xs"
+                        loading={busy === `del-${p.id}`}
                         onClick={() => void remove(p.id)}
                       >
                         删
-                      </button>
+                      </Button>
                     </div>
                   </div>
                 </div>
@@ -434,8 +437,9 @@ export function ApiProfiles({
                               }
                             }}
                           />
-                          <button
-                            className="btn-primary !min-h-[28px] !px-2 !py-1 !text-[11px]"
+                          <Button
+                            variant="primary"
+                            size="xs"
                             onClick={() => {
                               const el = document.querySelector<HTMLInputElement>(
                                 `input[data-profile="${p.id}"]`,
@@ -445,7 +449,7 @@ export function ApiProfiles({
                             data-save-for={p.id}
                           >
                             保存
-                          </button>
+                          </Button>
                         </div>
                         <p className="text-[10px] text-stone-400">
                           在上方输入框回车即可保存

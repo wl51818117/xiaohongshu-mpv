@@ -1,9 +1,69 @@
-import type { ReactNode } from 'react'
+import type { ButtonHTMLAttributes, ReactNode } from 'react'
 
 /** 基础 UI 组件 —— 紫色渐变主题。
  *
  * 视觉规格来自设计令牌（见 index.css），改主题只需改 CSS 变量。
  */
+
+/* ── 按钮 ──
+ * ★ 为什么要封装组件：
+ *   原来全项目有 18 种按钮写法，全靠 `!min-h-[26px] !px-2 !text-[11px]`
+ *   这类 !important 硬凑尺寸 —— 同样的语义按钮在不同页面高度不一致，
+ *   改主题时也改不动。现在统一走<Button>，尺寸/变体由 props 决定。
+ *
+ * 用法：<Button variant="primary" size="sm" loading={busy} onClick={...}>
+ * 语义化变体：primary 主要动作 / default 次要 / ghost 弱化 / danger 危险
+ * 尺寸：xs 超小（表格行内）· sm 小（工具条）· md 标准 · lg 大（空态引导）
+ */
+
+type BtnVariant = 'primary' | 'default' | 'ghost' | 'danger' | 'subtle'
+type BtnSize = 'xs' | 'sm' | 'md' | 'lg'
+
+const BTN_VARIANTS: Record<BtnVariant, string> = {
+  primary: 'btn-primary',
+  default: 'btn-ghost',
+  ghost: 'btn-ghost !border-transparent !bg-transparent hover:!bg-[var(--surface-2)]',
+  danger: 'btn-ghost !text-red-600 hover:!border-red-300 hover:!bg-red-50 dark:hover:!bg-red-500/10',
+  subtle: 'btn-subtle',
+}
+
+const BTN_SIZES: Record<BtnSize, string> = {
+  xs: '!min-h-[26px] !px-2 !text-[11px] !rounded-[6px]',
+  sm: 'btn-sm',
+  md: '',
+  lg: '!min-h-[42px] !px-5 !text-[15px]',
+}
+
+export function Button({
+  variant = 'default',
+  size = 'md',
+  loading = false,
+  disabled,
+  children,
+  className = '',
+  ...rest
+}: ButtonHTMLAttributes<HTMLButtonElement> & {
+  variant?: BtnVariant
+  size?: BtnSize
+  loading?: boolean
+}) {
+  return (
+    <button
+      {...rest}
+      disabled={disabled || loading}
+      // loading 时禁用点击并显示半透明 —— 与 disabled 视觉一致，避免误以为还能点
+      className={`btn ${BTN_VARIANTS[variant]} ${BTN_SIZES[size]} ${className}`}
+    >
+      {loading && (
+        <span
+          aria-hidden
+          className="inline-block h-3 w-3 shrink-0 animate-spin rounded-full border-2 border-current border-t-transparent"
+        />
+      )}
+      {children}
+    </button>
+  )
+}
 
 /* ── 徽章配色 ── */
 const TAG_TONES = {

@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useState } from 'react'
-import { Tag } from './ui'
+import { Button, Tag } from './ui'
 
 type Feed = { name: string; url: string; category: string }
 type Group = { key: string; label: string; desc: string; feeds: Feed[] }
@@ -167,14 +167,15 @@ export function FeedsManager({
                     <span className="text-[11px] text-stone-400">{g.desc}</span>
                   )}
                 </div>
-                <button
-                  className="btn-ghost !px-2 !py-1 !text-xs"
+                <Button
+                  variant="danger"
+                  size="sm"
                   disabled={saving}
                   onClick={() => removeGroup(g)}
                   aria-label={`删除赛道 ${g.label}`}
                 >
                   删赛道
-                </button>
+                </Button>
               </div>
 
               {/* 源列表 */}
@@ -254,13 +255,14 @@ export function FeedsManager({
                   placeholder="分类"
                   className="field !min-h-[30px] !w-16 !py-1 !text-xs"
                 />
-                <button
-                  className="btn-primary !min-h-[30px] !px-2.5 !py-1 !text-xs"
+                <Button
+                  variant="primary"
+                  size="sm"
                   disabled={saving}
                   onClick={() => void addFeed(g)}
                 >
                   + 加源
-                </button>
+                </Button>
               </div>
             </div>
           )

@@ -6,7 +6,9 @@
 
 from __future__ import annotations
 
-from fastapi import APIRouter, Depends, HTTPException
+import json
+
+from fastapi import APIRouter, Depends, HTTPException, Request
 from pydantic import BaseModel, Field
 from sqlalchemy.orm import Session
 
@@ -47,8 +49,8 @@ class ValidateRequest(BaseModel):
 
 
 @router.post("/generate", summary="生成封面或内页")
-def generate(
-    req: GenerateRequest | None = None,
+async def generate(
+    request: Request,
     draft_id: int | None = None,
     kind: str = "cover",
     style: str = "realistic",
@@ -60,15 +62,28 @@ def generate(
     参数来源：优先 JSON body，其次 query —— 两者都支持，
     方便从地址栏或 curl 快速触发。
 
-    ★ 当前是本地占位实现（尺寸真实、内容待接 AI API），
-      接真实生图只需替换 asset_generator._call_provider。
+    ★ body 用 Request 自己读，不声明成 Pydantic 模型：
+      声明 `GenerateRequest | None` 时，body 传 `{}` 会被 FastAPI
+      拿去实例化该模型并因缺必填字段直接 422，
+      根本走不到「query 兜底」的合并逻辑（踩过）。
     """
-    # 合并两种参数来源
-    if req is not None:
-        draft_id = req.draft_id
-        kind = req.kind
-        style = req.style
-        count = req.count
+    body: dict = {}
+    try:
+        body = await request.json()
+    except Exception:  # noqa: BLE001
+        body = {}
+    if not isinstance(body, dict):
+        body = {}
+
+    if body.get("draft_id"):
+        draft_id = int(body["draft_id"])
+    if body.get("kind"):
+        kind = str(body["kind"])
+    if body.get("style"):
+        style = str(body["style"])
+    if body.get("count"):
+        count = int(body["count"])
+
     if not draft_id:
         raise HTTPException(status_code=400, detail="缺少 draft_id")
 
@@ -78,8 +93,21 @@ def generate(
 
     title = draft.title or (draft.topic.title if draft.topic else "未命名")
 
+    # ★ 构造稿件上下文 —— 素材与稿件同源的关键。
+    #   原来只传 title，导致生成出来的图与正文内容毫无关系。
+    #   keyword 存在 Topic 上（Draft 本身没有这个字段），
+    #   且 Draft 可能没有关联 Topic，所以逐级兜底。
+    keyword = draft.topic.keyword_target if draft.topic else ""
+    ctx = ag.DraftContext(
+        title=title,
+        keyword=keyword or "",
+        body=draft.body or "",
+        tags=list(draft.tags or []),
+        topic_title=(draft.topic.title if draft.topic else ""),
+    )
+
     if kind == "cover":
-        r = ag.generate_cover(draft_id, title, style)
+        r = ag.generate_cover(ctx, style)
         if r.ok and r.files:
             # 首个作为当前封面，其余留作备选（存images 前位）
             draft.cover_url = r.files[0]
@@ -89,9 +117,15 @@ def generate(
             "ok": r.ok, "kind": "cover", "files": r.files,
             "prompt": r.prompt, "provider": r.provider, "error": r.error,
             "validation": ag.validate_asset(r.files[0]) if r.files else None,
+            "context_used": {
+                "keyword": ctx.keyword,
+                "key_points": ctx.key_points,
+                "tags": ctx.tags,
+                "body_len": len(ctx.body),
+            },
         }
 
-    r = ag.generate_inner(draft_id, title, count)
+    r = ag.generate_inner(ctx, count)
     if r.ok and r.files:
         # 内页追加（封面保持在首位）
         existing = list(draft.images or [])
@@ -103,7 +137,143 @@ def generate(
         "ok": r.ok, "kind": "inner", "files": r.files,
         "prompt": r.prompt, "provider": r.provider, "error": r.error,
         "validation": None,
+        "context_used": {
+            "keyword": ctx.keyword,
+            "key_points": ctx.key_points,
+            "tags": ctx.tags,
+            "body_len": len(ctx.body),
+        },
     }
+
+
+@router.get("/provider", summary="生图服务配置状态")
+def get_provider() -> dict:
+    """返回生图配置状态（**不含密钥明文**）。"""
+    return ag.provider_status()
+
+
+class ProviderIn(BaseModel):
+    """生图服务配置。"""
+
+    base_url: str = Field("", description="服务地址，如 https://api.siliconflow.cn/v1")
+    api_key: str = Field("", description="API 密钥（加密存储）")
+    model: str = Field("", description="模型名，如 black-forest-labs/FLUX.1-schnell")
+    kind: str = Field("openai", description="openai / seedream")
+    size: str = Field("1080x1440", description="出图尺寸，硬要求 3:4")
+    enabled: bool = Field(False, description="是否启用真实生图")
+    timeout: int = Field(180, ge=10, le=600)
+
+
+@router.put("/provider", summary="保存生图服务配置")
+def save_provider(cfg: ProviderIn) -> dict:
+    """保存生图配置。密钥 Fernet 加密落盘，查询只返掩码。"""
+    from app.api.settings import _enc  # 复用同一套加密
+
+    base = cfg.base_url.strip().rstrip("/")
+    if cfg.enabled:
+        missing = [
+            name
+            for name, val in (("地址", base), ("密钥", cfg.api_key.strip()),
+                               ("模型", cfg.model.strip()))
+            if not val
+        ]
+        if missing:
+            raise HTTPException(
+                status_code=400,
+                detail=f"启用生图前必须填写：{'、'.join(missing)}",
+            )
+        if not base.startswith(("http://", "https://")):
+            raise HTTPException(status_code=400, detail="地址必须以 http:// 或 https:// 开头")
+
+    data = {
+        "base_url": base,
+        "api_key": _enc(cfg.api_key.strip()) if cfg.api_key.strip() else "",
+        "model": cfg.model.strip(),
+        "kind": cfg.kind if cfg.kind in ("openai", "seedream") else "openai",
+        "size": cfg.size or "1080x1440",
+        "enabled": cfg.enabled,
+        "timeout": cfg.timeout,
+    }
+    ag._PROVIDER_FILE.parent.mkdir(parents=True, exist_ok=True)
+    ag._PROVIDER_FILE.write_text(
+        json.dumps(data, ensure_ascii=False, indent=2), encoding="utf-8"
+    )
+    return {"ok": True, "status": ag.provider_status()}
+
+
+class ProviderTestIn(BaseModel):
+    base_url: str
+    api_key: str
+    model: str = ""
+    kind: str = "openai"
+    size: str = "1080x1440"
+
+
+@router.post("/provider/test", summary="测试生图服务连通性")
+def test_provider(cfg: ProviderTestIn) -> dict:
+    """真实发一次最小生图请求，验证地址/密钥/模型是否可用。"""
+    import time
+
+    from app.api.settings import _dec
+
+    key = cfg.api_key.strip()
+    # 允许用已保存的掩码回测
+    if not key or "..." in key:
+        saved = ag.load_image_provider()
+        key = _dec(saved.get("api_key") or "") if saved.get("api_key") else ""
+
+    if not cfg.base_url.strip() or not key:
+        return {"ok": False, "status": "incomplete",
+                "message": "地址与密钥都不能为空"}
+
+    base = cfg.base_url.strip().rstrip("/")
+    model = (cfg.model or "").strip() or "black-forest-labs/FLUX.1-schnell"
+    size = cfg.size or "1080x1440"
+    payload: dict = {"model": model, "prompt": "一朵云", "n": 1}
+    if cfg.kind == "seedream":
+        try:
+            w, h = (int(x) for x in size.lower().split("x"))
+        except Exception:  # noqa: BLE001
+            w, h = 1080, 1440
+        payload.update({"width": w, "height": h, "response_format": "url",
+                        "watermark": False})
+    else:
+        payload["size"] = size
+
+    t0 = time.time()
+    try:
+        import httpx
+
+        r = httpx.post(
+            f"{base}/images/generations",
+            json=payload,
+            headers={"content-type": "application/json",
+                     "authorization": f"Bearer {key}"},
+            timeout=90,
+        )
+    except Exception as exc:  # noqa: BLE001
+        return {"ok": False, "status": "unreachable", "ms": int((time.time() - t0) * 1000),
+                "message": f"地址无法访问：{exc}"}
+    ms = int((time.time() - t0) * 1000)
+
+    if r.status_code == 200:
+        try:
+            has = bool((r.json().get("data") or []))
+        except Exception:  # noqa: BLE001
+            has = False
+        return {"ok": True, "status": "success" if has else "bad_request", "ms": ms,
+                "message": "连接成功，已返回图片" if has else "连接成功但未返回图片，检查模型名"}
+    if r.status_code in (401, 403):
+        return {"ok": False, "status": "auth_failed", "ms": ms,
+                "message": "密钥无效或无权限"}
+    if r.status_code == 404:
+        return {"ok": False, "status": "bad_request", "ms": ms,
+                "message": "接口不存在，检查地址是否含/v1 等路径后缀"}
+    if r.status_code in (502, 503, 504):
+        return {"ok": False, "status": "unreachable", "ms": ms,
+                "message": "服务暂时不可用（网关错误），稍后重试"}
+    return {"ok": False, "status": "error", "ms": ms,
+            "message": f"HTTP {r.status_code}：{r.text[:150]}"}
 
 
 @router.post("/video", summary="图生视频")

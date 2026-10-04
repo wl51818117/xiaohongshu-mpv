@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useState } from 'react'
-import { EmptyState, SectionTitle, Tag } from './ui'
+import { Button, EmptyState, SectionTitle, Tag } from './ui'
 
 type Derived = {
   interaction_rate: number
@@ -216,13 +216,16 @@ export function AnalyticsBoard({
               </div>
             ))}
           </div>
-          <button
-            className="btn btn-primary mt-4 w-full"
+          <Button
+            variant="primary"
+            size="md"
+            className="mt-4 w-full"
+            loading={busy === 'submit'}
             disabled={busy !== null}
             onClick={() => void submit()}
           >
-            {busy === 'submit' ? '记录中…' : '记录并生成投流建议'}
-          </button>
+            记录并生成投流建议
+          </Button>
           <p className="mt-2 text-[11px] leading-relaxed text-stone-400">
             {dash?.note ?? '数据需手动录入或接官方 API —— 本系统不代抓小红书数据'}
           </p>
@@ -289,13 +292,15 @@ export function AnalyticsBoard({
               已采样 {patterns?.sampled ?? 0} 篇有数据的稿件
             </p>
           </div>
-          <button
-            className="btn btn-primary btn-sm"
+          <Button
+            variant="primary"
+            size="sm"
+            loading={busy === 'feed'}
             disabled={busy !== null || (patterns?.sampled ?? 0) === 0}
             onClick={() => void feedTopics()}
           >
-            {busy === 'feed' ? '回流中…' : '回流为新选题'}
-          </button>
+            回流为新选题
+          </Button>
         </div>
 
         {!patterns || patterns.top_drafts.length === 0 ? (

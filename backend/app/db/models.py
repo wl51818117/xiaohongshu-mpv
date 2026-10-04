@@ -178,3 +178,54 @@ class ToolCallLog(Base):
     created_at: Mapped[datetime] = mapped_column(
         DateTime, server_default=func.now(), index=True
     )
+
+
+class KnowledgeItem(Base):
+    """知识库条目：踩坑与复盘的经验沉淀，供 Agent 检索。
+
+    来源可以是 Obsidian 库导入，也可以是运行时记录的错误/复盘。
+    检索走 `search_knowledge()`（BM25-lite 关键词打分 + 标签加权），
+    不依赖向量库—— 本机量级（千条以内）下关键词检索足够，
+    且零依赖、可离线、可解释。
+    """
+
+    __tablename__ = "knowledge_items"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    title: Mapped[str] = mapped_column(String(300), index=True)
+    # kind: pitfall 踩坑 / review 复盘 / spec 规格 / insight 经验
+    kind: Mapped[str] = mapped_column(String(30), default="pitfall", index=True)
+    # 四段式正文（沿用 Obsidian 的结构：为什么/怎么用/反例/关联）
+    why: Mapped[str] = mapped_column(Text, default="")
+    how: Mapped[str] = mapped_column(Text, default="")
+    pitfall: Mapped[str] = mapped_column(Text, default="")   # 反例或边界
+    related: Mapped[str] = mapped_column(Text, default="")   # 关联
+    tags: Mapped[str] = mapped_column(String(300), default="")
+    source: Mapped[str] = mapped_column(String(200), default="")
+    # 使用统计：被检索到几次 —— 支持「定期回顾」挑高频条目复看
+    hit_count: Mapped[int] = mapped_column(Integer, default=0)
+    last_hit_at: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime, server_default=func.now(), index=True
+    )
+    updated_at: Mapped[datetime] = mapped_column(
+        DateTime, server_default=func.now(), onupdate=func.now()
+    )
+
+
+class MistakeLog(Base):
+    """错误本：运行时自动沉淀的踩坑（供定期回顾）。"""
+
+    __tablename__ = "mistake_logs"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    scene: Mapped[str] = mapped_column(String(100), default="", index=True)
+    symptom: Mapped[str] = mapped_column(Text, default="")
+    cause: Mapped[str] = mapped_column(Text, default="")
+    fix: Mapped[str] = mapped_column(Text, default="")
+    # reviewed: 是否已复盘过（定期回顾时按未回顾的排前面）
+    reviewed: Mapped[int] = mapped_column(Integer, default=0, index=True)
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime, server_default=func.now(), index=True
+    )
+    reviewed_at: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)

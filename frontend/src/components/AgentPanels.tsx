@@ -4,7 +4,7 @@ import {
   readPanels,
   type DynamicPanel,
 } from '../bridge/extensibility'
-import { EmptyState, SectionTitle, Tag } from './ui'
+import { Button, EmptyState, SectionTitle, Tag } from './ui'
 
 /** Agent 动态面板的渲染器。
  *
@@ -100,15 +100,14 @@ export function AgentPanels({
       {current && panels.length > 1 && (
         <div className="mb-3 flex flex-wrap gap-1.5">
           {panels.map((p) => (
-            <button
+            <Button
               key={p.id}
+              variant={current === p.id ? 'primary' : 'default'}
+              size="sm"
               onClick={() => onOpen(p.id)}
-              className={`btn btn-sm ${
-                current === p.id ? 'btn-primary' : 'btn-ghost'
-              }`}
             >
               {p.title}
-            </button>
+            </Button>
           ))}
         </div>
       )}
@@ -124,13 +123,14 @@ export function AgentPanels({
                 <Tag tone="purple">{p.kind}</Tag>
                 <Tag tone="gray">{p.createdBy === 'agent' ? 'Agent 创建' : '手动'}</Tag>
               </div>
-              <button
+              <Button
+                variant="danger"
+                size="sm"
                 onClick={() => remove(p.id)}
-                className="btn-ghost !px-2 !py-1 !text-xs"
                 aria-label={`删除 ${p.title}`}
               >
                 删除
-              </button>
+              </Button>
             </div>
             {p.note && (
               <p className="mb-3 text-xs text-stone-500">{p.note}</p>

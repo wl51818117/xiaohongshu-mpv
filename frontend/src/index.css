@@ -241,6 +241,25 @@ body {
     border-radius: var(--r-sm);
   }
 
+  /* 强调按钮（多步流程的主路径）。
+     ★ 以前代码里用了 btn-accent，但这个类从没定义过，
+       导致那些按钮渲染成无主色的裸样式。已补上定义。 */
+  .btn-accent {
+    background: linear-gradient(
+      135deg,
+      var(--grad-orange-from),
+      var(--grad-orange-to)
+    );
+    color: #fff;
+    box-shadow: 0 4px 14px rgba(245, 158, 11, 0.3);
+  }
+  .btn-accent:hover:not(:disabled) {
+    filter: brightness(1.06);
+  }
+  .btn-accent:active:not(:disabled) {
+    transform: translateY(1px);
+  }
+
   /* 徽章 */
   .tag {
     display: inline-flex;

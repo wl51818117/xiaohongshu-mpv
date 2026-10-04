@@ -18,6 +18,7 @@ import {
   StatusBadge,
   StatusDot,
   ValueTypeBadge,
+  Button,
 } from './components/ui'
 import { AgentChat } from './components/AgentChat'
 import { BREAKPOINT_NARROW, useMediaQuery } from './hooks/useMediaQuery'
@@ -26,6 +27,7 @@ import { PageScaffold } from './components/PageScaffold'
 import { WritingDesk } from './components/WritingDesk'
 import { AssetStudio } from './components/AssetStudio'
 import { AnalyticsBoard } from './components/AnalyticsBoard'
+import { KnowledgeBase } from './components/KnowledgeBase'
 import { SettingsPanel } from './components/SettingsPanel'
 import { AgentPanels } from './components/AgentPanels'
 import { buildStepStatus, stepsOf, type StepStatus } from './lib/flow'
@@ -40,12 +42,14 @@ type Tab =
   | 'assets'
   | 'publish'
   | 'analytics'
+  | 'knowledge'
   | 'dynamic'
 
 /**
  * 导航顺序 = 内容生产顺序：
  * 流程图（总览）→ 流水线（采集）→ 素材库（原料）→ 选题库（选题）
  * → 稿件（文案）→ 素材工坊（图/视频）→ 发布队列→ 数据看板（复盘）
+ * → 知识库（经验沉淀与回顾）
  */
 const TABS: { key: Tab; label: string; hint: string }[] = [
   { key: 'flow', label: '流程图', hint: '图文 / 视频' },
@@ -56,6 +60,7 @@ const TABS: { key: Tab; label: string; hint: string }[] = [
   { key: 'assets', label: '素材工坊', hint: '图片 / 视频' },
   { key: 'publish', label: '发布队列', hint: '半自动发布' },
   { key: 'analytics', label: '数据看板', hint: '复盘与爆文复用' },
+  { key: 'knowledge', label: '知识库', hint: '踩坑与经验' },
   { key: 'dynamic', label: '自定义面板', hint: 'Agent 动态创建' },
 ]
 
@@ -610,13 +615,14 @@ export default function App() {
 
           {/* 窄屏时的 Agent 入口 */}
           {isNarrow && (
-            <button
-              className="btn btn-primary btn-sm"
+            <Button
+              variant="primary"
+              size="sm"
               onClick={() => setAgentOpen(true)}
               aria-label="打开 Agent"
             >
               Agent
-            </button>
+            </Button>
           )}
         </header>
 
@@ -741,6 +747,8 @@ export default function App() {
             />
           )}
 
+          {tab === 'knowledge' && <KnowledgeBase onNotify={notify} />}
+
           {tab === 'topics' && (
             <>
               <SectionTitle
@@ -773,12 +781,13 @@ export default function App() {
                       <option value="archived">已归档</option>
                     </select>
                     {(topicFilter.status || topicFilter.keyword) && (
-                      <button
-                        className="btn-ghost !px-2 !py-1 !text-xs"
+                      <Button
+                        variant="ghost"
+                        size="sm"
                         onClick={() => setTopicFilter({})}
                       >
                         清除
-                      </button>
+                      </Button>
                     )}
                   </div>
                 }
@@ -834,22 +843,25 @@ export default function App() {
                         </div>
                         <div className="flex shrink-0 flex-col gap-1">
                           <div className="flex gap-1">
-                            <button
-                              className="btn-primary !px-2.5 !py-1 !text-xs"
+                            <Button
+                              variant="primary"
+                              size="sm"
+                              loading={busy === `draft-${t.id}`}
                               disabled={busy !== null}
                               onClick={() => void startDraftFromTopic(t)}
                             >
                               {busy === `draft-${t.id}` ? '转稿中' : '写稿'}
-                            </button>
-                            <button
-                              className="btn-ghost !px-2 !py-1 !text-xs !text-red-500"
+                            </Button>
+                            <Button
+                              variant="danger"
+                              size="sm"
                               disabled={busy !== null}
                               onClick={() => void removeTopic(t)}
                               aria-label={`删除选题 ${t.title}`}
                               title="删除该选题"
                             >
                               删
-                            </button>
+                            </Button>
                           </div>
                           {selectedTopicId === t.id && (
                             <span className="text-center text-[10px] text-orange-600">
@@ -902,13 +914,16 @@ export default function App() {
                       >
                         {m.has_topic ? '已转选题' : '待转换'}
                       </span>
-                      <button
-                        className="btn-primary shrink-0 !px-2.5 !py-1 !text-xs"
+                      <Button
+                        variant="primary"
+                        size="sm"
+                        className="shrink-0"
+                        loading={busy === `mat-${m.id}`}
                         disabled={busy !== null}
                         onClick={() => void addMaterialToTopic(m)}
                       >
                         {busy === `mat-${m.id}` ? '处理中' : '加入选题'}
-                      </button>
+                      </Button>
                     </div>
                   ))}
                 </div>
@@ -983,34 +998,43 @@ export default function App() {
                 </div>
 
                 <div className="mt-5 flex flex-wrap gap-2 border-t border-stone-200 pt-4">
-                  <button
-                    className="btn-ghost"
+                  <Button
+                    variant="default"
+                    size="sm"
+                    loading={busy === 'collect'}
                     disabled={busy !== null}
                     onClick={() => runCollect(3)}
                   >
                     {busy === 'collect' ? '采集中…' : '仅采集（每源 3 条）'}
-                  </button>
-                  <button
-                    className="btn-ghost"
+                  </Button>
+                  <Button
+                    variant="default"
+                    size="sm"
+                    loading={busy === 'convert'}
                     disabled={busy !== null}
                     onClick={() => runConvert()}
                   >
                     {busy === 'convert' ? '转换中…' : '仅转换'}
-                  </button>
-                  <button
-                    className="btn-accent"
+                  </Button>
+                  {/* 注：原来是 btn-accent，但 CSS 里从没定义过这个类，
+                      按钮其实没主色样式。改用 primary 让主路径更醒目。 */}
+                  <Button
+                    variant="primary"
+                    size="sm"
+                    loading={busy === 'all'}
                     disabled={busy !== null}
                     onClick={runAll}
                   >
                     {busy === 'all' ? '执行中…' : '一键跑完整流程'}
-                  </button>
-                  <button
-                    className="btn-ghost"
+                  </Button>
+                  <Button
+                    variant="default"
+                    size="sm"
                     disabled={busy !== null}
                     onClick={refresh}
                   >
                     刷新
-                  </button>
+                  </Button>
                 </div>
               </div>
 

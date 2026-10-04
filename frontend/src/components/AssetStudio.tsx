@@ -1,8 +1,16 @@
-import { useCallback, useState } from 'react'
+import { useCallback, useEffect, useState } from 'react'
 import { type Draft, type Validation } from '../lib/api'
-import { EmptyState, SectionTitle, Tag } from './ui'
+import { Button, EmptyState, SectionTitle, Tag } from './ui'
 
 type Style = 'realistic' | 'clean' | 'vivid'
+
+/** 生图服务配置状态（不含密钥明文） */
+type ImageProvider = {
+  configured: boolean
+  model: string
+  key_masked: string
+  hint: string
+}
 
 const STYLES: { key: Style; label: string }[] = [
   { key: 'realistic', label: '写实摄影' },
@@ -29,6 +37,23 @@ export function AssetStudio({
   const [busy, setBusy] = useState<string | null>(null)
   const [coverCheck, setCoverCheck] = useState<Validation | null>(null)
   const [lastPrompt, setLastPrompt] = useState('')
+  const [provider, setProvider] = useState<ImageProvider | null>(null)
+
+  // 生图配置状态：决定要不要提示「当前是占位图」
+  useEffect(() => {
+    let alive = true
+    fetch('/api/assets/provider')
+      .then((r) => r.json())
+      .then((d) => {
+        if (alive) setProvider(d)
+      })
+      .catch(() => {
+        /* 拿不到就不提示，不影响主流程 */
+      })
+    return () => {
+      alive = false
+    }
+  }, [])
 
   const cover = draft?.cover_url || ''
   const images = draft?.images || []
@@ -105,6 +130,22 @@ export function AssetStudio({
         desc={`稿件 #${draft.id} ·${draft.title || '未命名'}`}
       />
 
+      {/* 生图服务状态：未配置时明确告知用的是占位图，别让用户误以为是真图 */}
+      {provider && !provider.configured && (
+        <div className="mb-4 rounded-[var(--r-md)] border border-amber-200 bg-amber-50 px-3 py-2.5 text-[12px] text-amber-800 dark:border-amber-500/30 dark:bg-amber-500/10 dark:text-amber-300">
+          <strong className="font-medium">当前使用本地占位图</strong>
+          <span className="ml-1">
+            （尺寸真实、画面为占位）。接入真实生图请到「设置 → 生图 API」填写地址、密钥与模型。
+          </span>
+        </div>
+      )}
+      {provider?.configured && (
+        <div className="mb-4 rounded-[var(--r-md)] border border-emerald-200 bg-emerald-50 px-3 py-2.5 text-[12px] text-emerald-800 dark:border-emerald-500/30 dark:bg-emerald-500/10 dark:text-emerald-300">
+          已接入 <strong className="font-medium">{provider.model}</strong>
+          <span className="ml-1 opacity-80">（{provider.key_masked}）</span>
+        </div>
+      )}
+
       {/* 操作区 */}
       <div className="card mb-5 p-5">
         <div className="grid gap-4 md:grid-cols-3">
@@ -113,24 +154,27 @@ export function AssetStudio({
             <div className="field-label">封面风格</div>
             <div className="mb-2 flex gap-1.5">
               {STYLES.map((s) => (
-                <button
+                <Button
                   key={s.key}
+                  variant={style === s.key ? 'primary' : 'default'}
+                  size="sm"
+                  className="flex-1"
                   onClick={() => setStyle(s.key)}
-                  className={`btn btn-sm flex-1 ${
-                    style === s.key ? 'btn-primary' : 'btn-ghost'
-                  }`}
                 >
                   {s.label}
-                </button>
+                </Button>
               ))}
             </div>
-            <button
-              className="btn btn-primary w-full"
+            <Button
+              variant="primary"
+              size="md"
+              className="w-full"
+              loading={busy === 'cover'}
               disabled={busy !== null}
               onClick={() => void gen('cover')}
             >
-              {busy === 'cover' ? '生成中…' : '生成封面（3 候选）'}
-            </button>
+              生成封面（3 候选）
+            </Button>
             <p className="mt-1.5 text-[11px] text-stone-400">
               3:4 竖版 1080×1440 · 点击率 &lt;2.5% 难晋级流量池，出 3 个候选挑
             </p>
@@ -150,28 +194,34 @@ export function AssetStudio({
                 </option>
               ))}
             </select>
-            <button
-              className="btn btn-ghost w-full"
+            <Button
+              variant="default"
+              size="md"
+              className="w-full"
+              loading={busy === 'inner'}
               disabled={busy !== null}
               onClick={() => void gen('inner')}
             >
-              {busy === 'inner' ? '生成中…' : '生成内页'}
-            </button>
+              生成内页
+            </Button>
             <p className="mt-1.5 text-[11px] text-stone-400">
-              九宫格顺序：全景 → 细节 → 场景 → 对比 → 卖点
+              每张对应正文里的一个真实信息点，与稿件同源
             </p>
           </div>
 
           {/* 视频 */}
           <div>
             <div className="field-label">视频链路</div>
-            <button
-              className="btn btn-ghost w-full"
+            <Button
+              variant="default"
+              size="md"
+              className="w-full"
+              loading={busy === 'video'}
               disabled={busy !== null || !cover}
               onClick={() => void compose()}
             >
-              {busy === 'video' ? '生成中…' : '生成图生视频方案'}
-            </button>
+              生成图生视频方案
+            </Button>
             <p className="mt-1.5 text-[11px] text-stone-400">
               ★ 必须图生视频（文生视频画面不可控）；单镜头 3-5 秒最稳
             </p>

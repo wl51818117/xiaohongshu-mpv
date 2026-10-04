@@ -65,10 +65,63 @@ def _rel(path: Path) -> str:
 
 # ── 提示词构造 ────────────────────────────────────────────
 
-def build_cover_prompt(title: str, style: str = "realistic") -> str:
-    """封面提示词。
+@dataclass
+class DraftContext:
+    """上游稿件上下文 —— 素材与稿件同源的依据。
 
-    3:4 竖版是硬要求，直接写进提示词而不是生成后再裁——
+    ★ 这是「素材工坊与稿件串联」的关键：没有它，
+      build_cover_prompt 只能拿到 title，生成出来的图与正文毫无关系。
+    """
+
+    title: str
+    keyword: str = ""
+    body: str = ""
+    tags: list[str] | None = None
+    topic_title: str = ""
+
+    @property
+    def core_terms(self) -> list[str]:
+        """从长尾词里取可埋入画面的核心词（与校验器同源）。"""
+        import re as _re
+        if not self.keyword:
+            return []
+        terms = [t for t in _re.split(r"[\s、,，/|+]+", self.keyword) if t]
+        terms.sort(key=len, reverse=True)
+        return terms[:2]
+
+    @property
+    def key_points(self) -> list[str]:
+        """从正文里抽取画面要点。
+
+        做法：按中文标点切句→ 取含数字或「是/有/用/选」等判断词的短句
+        → 按字数排序取前几条。宁可粗糙也不要引入额外模型调用。
+        """
+        import re as _re
+        if not self.body:
+            return []
+        sentences = _re.split(r"[。！？\n；;]+", self.body)
+        scored: list[tuple[int, str]] = []
+        for s in sentences:
+            s = s.strip()
+            if not (8 <= len(s) <= 30):
+                continue
+            score = 0
+            if _re.search(r"\d", s):
+                score += 2# 有具体数字更适合做画面
+            if _re.search(r"(是|有|用|选|买|注意|避免|关键|重点|区别|方法)", s):
+                score += 1
+            if _re.search(r"(我|你|姐妹|宝|建议|实测)", s):
+                score += 1
+            if score:
+                scored.append((score, s))
+        scored.sort(key=lambda x: -x[0])
+        return [s for _, s in scored[:4]]
+
+
+def build_cover_prompt(ctx: DraftContext, style: str = "realistic") -> str:
+    """封面提示词 —— **吃稿件全上下文**。
+
+    3:4 竖版是硬要求，直接写进提示词而不是生成后再裁，
     这样模型的构图会按竖版设计。
     """
     style_map = {
@@ -77,18 +130,32 @@ def build_cover_prompt(title: str, style: str = "realistic") -> str:
         "vivid": "色彩鲜明，视觉冲击强，高饱和",
     }
     desc = style_map.get(style, style_map["realistic"])
-    return (
-        f"小红书封面图，3:4 竖版构图（1080×1440）。"
-        f"主题：{title}。"
-        f"风格：{desc}。"
-        f"要求：主体突出，占画面 60% 以上；画面简洁；"
-        f"文字区域不超过画面 30%；右下角预留信息区。"
-        f"禁止出现：水印、二维码、联系方式、文字乱码。"
+
+    # 关键词与画面要点：让图承载内容，而不是一张泛泛的漂亮图
+    core = "、".join(ctx.core_terms)
+    points = ctx.key_points
+    parts = [
+        f"小红书封面图，3:4 竖版构图（1080×1440）。",
+        f"主题：{ctx.title}。",
+        f"风格：{desc}。",
+    ]
+    if core:
+        parts.append(f"画面需体现的核心概念：{core}。")
+    if points:
+        parts.append("画面要传达的信息点：" + "；".join(points[:3]) + "。")
+    if ctx.tags:
+        parts.append("相关品类参考：" + "、".join(ctx.tags[:4]) + "。")
+
+    parts.append(
+        "要求：主体突出，占画面 60% 以上；画面简洁；"
+        "文字区域不超过画面 30%；右下角预留信息区。"
+        "禁止出现：水印、二维码、联系方式、文字乱码。"
     )
+    return "".join(parts)
 
 
-def build_inner_prompt(title: str, index: int, total: int) -> str:
-    """内页提示词，按九宫格顺序分配内容。"""
+def build_inner_prompt(ctx: DraftContext, index: int, total: int) -> str:
+    """内页提示词，按顺序分配内容，且每张对应稿件的一个真实信息点。"""
     roles = [
         "产品全景展示",
         "材质/工艺细节特写",
@@ -98,16 +165,27 @@ def build_inner_prompt(title: str, index: int, total: int) -> str:
         "选购/使用指引",
     ]
     role = roles[(index - 1) % len(roles)]
-    return (
-        f"小红书图文内页第 {index}/{total} 张，3:4 竖版（1080×1440）。"
-        f"主题：{title}。画面内容：{role}。"
-        f"要求：写实摄影风格，主体清晰，构图简洁，"
-        f"每张只讲一个点，不要堆砌信息。"
-        f"禁止出现：水印、二维码、联系方式。"
+    points = ctx.key_points
+    parts = [
+        f"小红书图文内页第 {index}/{total} 张，3:4 竖版（1080×1440）。",
+        f"主题：{ctx.title}。画面内容：{role}。",
+    ]
+    # ★ 关键：每张内页承载正文里的一个真实信息点，
+    #   而不是 6 张都用「产品全景」——那样图和文就各说各话。
+    if points:
+        idx = (index - 1) % len(points)
+        parts.append(f"本张要表达的信息点：{points[idx]}。")
+    if ctx.tags:
+        parts.append(f"品类参考：{'、'.join(ctx.tags[:3])}。")
+    parts.append(
+        "要求：写实摄影风格，主体清晰，构图简洁，"
+        "每张只讲一个点，不要堆砌信息。"
+        "禁止出现：水印、二维码、联系方式。"
     )
+    return "".join(parts)
 
 
-def build_video_prompt(title: str, scene: str = "") -> str:
+def build_video_prompt(ctx: DraftContext | str, scene: str = "") -> str:
     """图生视频的运镜提示词。
 
     ★ 注意：实际调用时以图片为主，提示词只描述运镜与动态，
@@ -120,6 +198,7 @@ def build_video_prompt(title: str, scene: str = "") -> str:
         "detail": "镜头聚焦细节做微距移动",
     }
     motion = scene_map.get(scene, scene_map["static"])
+    title = ctx.title if isinstance(ctx, DraftContext) else str(ctx)
     return (
         f"基于首帧图生成短视频。主题：{title}。"
         f"运镜：{motion}。"
@@ -127,21 +206,201 @@ def build_video_prompt(title: str, scene: str = "") -> str:
     )
 
 
-# ── Provider 抽象（对应 TODO P2 的 AI Provider 层）─────────
+# ── Provider 抽象 ─────────────────────────────────────────
+
+# 生图配置（由 API 层写入 data/image_provider.json，密钥 Fernet 加密）
+_PROVIDER_FILE = settings.data_dir / "image_provider.json"
+PROVIDER_NAME = "local-placeholder"
+
+
+def load_image_provider() -> dict:
+    """读生图服务配置（**自动解密密钥**）。
+
+    返回形如：
+      {"enabled": bool, "base_url": str, "api_key": str, "model": str,
+       "size": "1080x1440", "kind": "seedream|openai"}
+    """
+    if not _PROVIDER_FILE.exists():
+        return {"enabled": False, "kind": "openai"}
+    try:
+        raw = json.loads(_PROVIDER_FILE.read_text(encoding="utf-8"))
+    except Exception:  # noqa: BLE001
+        return {"enabled": False, "kind": "openai"}
+
+    raw = {**{"enabled": False, "kind": "openai"}, **raw}
+    # 密钥是密文存的，用到时才解密
+    cipher = str(raw.get("api_key") or "")
+    if cipher:
+        try:
+            from app.api.settings import _dec
+
+            raw["api_key"] = _dec(cipher)
+        except Exception:  # noqa: BLE001
+            # 解密失败通常是换机器了（密钥由机器信息派生）
+            raw["api_key"] = ""
+            raw["enabled"] = False
+    return raw
+
+
+def provider_status() -> dict:
+    """生图配置状态（供前端提示，**不含密钥明文**）。"""
+    cfg = load_image_provider()
+    key = str(cfg.get("api_key") or "")
+    return {
+        "configured": bool(cfg.get("enabled") and cfg.get("base_url") and key),
+        "enabled": bool(cfg.get("enabled")),
+        "kind": cfg.get("kind", "openai"),
+        "base_url": cfg.get("base_url", ""),
+        "model": cfg.get("model", ""),
+        "size": cfg.get("size", f"{COVER_W}x{COVER_H}"),
+        "key_masked": (key[:6] + "..." + key[-4:]) if len(key) > 12 else ("已配置" if key else ""),
+        "provider": PROVIDER_NAME,
+        "hint": (
+            "已接入真实生图服务"
+            if (cfg.get("enabled") and cfg.get("base_url") and key)
+            else "未配置生图 API，当前使用本地占位图（尺寸真实、画面为占位）。"
+                 "请到「设置 → 生图 API」填写地址/密钥/模型。"
+        ),
+    }
+
 
 def _call_provider(task: str, prompt: str, **kwargs) -> GenResult:
-    """统一调用入口。
+    """统一调用入口 —— 接真实生图只需在这里分发。
 
-    ★ 当前实现：本地「无外部依赖」的可运行方案。
-      真实 AI 生图需接Seedream / 本机 ImageGen，此处留好接口形状——
-      只要换掉这个函数，上层不用动。
-
-    为什么先做占位实现：
-      MVP 阶段最该验证的是「素材管线能不能跑通」（下载、尺寸校验、
-      ffmpeg 合成、规格拦截），而不是画面美不美。接API 只是换一行。
+    分发逻辑：配置完整 → 走真实 API；否则 → 本地占位（保证管线可跑通）。
+    上层（generate_cover/generate_inner）无需改动。
     """
+    global PROVIDER_NAME
     _ensure_dirs()
+    cfg = load_image_provider()
+    if cfg.get("enabled") and cfg.get("base_url") and cfg.get("api_key"):
+        result = _remote_image(task, prompt, cfg, **kwargs)
+        # 真实调用失败时不静默回退——用户需要知道配置有问题
+        if result.ok:
+            PROVIDER_NAME = f"remote:{cfg.get('model', '?')}"
+            return result
+        return result
+    PROVIDER_NAME = "local-placeholder"
     return _local_placeholder(task, prompt, **kwargs)
+
+
+def _remote_image(task: str, prompt: str, cfg: dict, **kwargs) -> GenResult:
+    """调真实生图 API。
+
+    支持两类协议（覆盖国内主流服务）：
+      - openai兼容：POST {base}/images/generations  {prompt, model, size, n}
+        （OpenAI DALL·E / SiliconFlow / 多数聚合服务）
+      - seedream：POST {base}/images/generations，额外带
+        response_format / watermark 等参数，尺寸用 width/height
+    """
+    import httpx  # 局部导入：这个函数是可选路径
+
+    base = str(cfg["base_url"]).rstrip("/")
+    model = str(cfg.get("model") or "").strip()
+    key = str(cfg["api_key"])
+    kind = str(cfg.get("kind") or "openai")
+    size = str(cfg.get("size") or f"{COVER_W}x{COVER_H}")
+    n = int(kwargs.get("count", 1))
+    if not model:
+        return GenResult(ok=False, kind=task, files=[], prompt=prompt,
+                         error="生图配置缺少模型名，请到设置里填写")
+
+    payload: dict = {"model": model, "prompt": prompt, "n": n}
+    if kind == "seedream":
+        try:
+            w, h = (int(x) for x in size.lower().split("x"))
+        except Exception:  # noqa: BLE001
+            w, h = COVER_W, COVER_H
+        payload.update({"width": w, "height": h,
+                        "response_format": "url", "watermark": False})
+    else:
+        payload["size"] = size
+
+    url = f"{base}/images/generations"
+    headers = {
+        "content-type": "application/json",
+        "authorization": f"Bearer {key}",
+    }
+    timeout = int(cfg.get("timeout") or 180)
+
+    try:
+        r = httpx.post(url, json=payload, headers=headers, timeout=timeout)
+    except Exception as exc:  # noqa: BLE001
+        return GenResult(ok=False, kind=task, files=[], prompt=prompt,
+                         error=f"生图服务不可达（{base}）：{exc}")
+
+    if r.status_code != 200:
+        return GenResult(
+            ok=False, kind=task, files=[], prompt=prompt,
+            error=f"生图服务返回 HTTP {r.status_code}：{r.text[:200]}",
+        )
+
+    try:
+        data = r.json()
+    except Exception:  # noqa: BLE001
+        return GenResult(ok=False, kind=task, files=[], prompt=prompt,
+                         error="生图服务返回的不是合法 JSON")
+
+    items = data.get("data") or []
+    if not items:
+        return GenResult(ok=False, kind=task, files=[], prompt=prompt,
+                         error=f"生图服务未返回图片：{str(data)[:200]}")
+
+    files: list[str] = []
+    import base64 as _b64
+    for idx, it in enumerate(items):
+        b64 = it.get("b64_json")
+        u = it.get("url")
+        if b64:
+            raw = _b64.b64decode(b64)
+        elif u:
+            try:
+                raw = httpx.get(u, timeout=timeout).content
+            except Exception:  # noqa: BLE001
+                continue
+        else:
+            continue
+        path = GEN_IMG_DIR / f"{task}_{uuid.uuid4().hex[:8]}_{idx}.png"
+        try:
+            path.write_bytes(raw)
+        except OSError:
+            continue
+        # 统一规格：真实服务可能不按3:4 返回，落盘前纠正
+        files.extend([_rel(_normalize_size(path))])
+
+    if not files:
+        return GenResult(ok=False, kind=task, files=[], prompt=prompt,
+                         error="生图结果下载或保存失败")
+
+    return GenResult(ok=True, kind=task, files=files, prompt=prompt,
+                     provider=f"remote:{model}", meta={"count": len(files)})
+
+
+def _normalize_size(path: Path) -> Path:
+    """把图片统一成 3:4（1080×1440），不一致则加白边而非拉伸。
+
+    拉伸会让商品变形；加白边更符合平台要求（信息流展示不变形）。
+    """
+    try:
+        from PIL import Image
+        with Image.open(path) as im:
+            w, h = im.size
+            if (w, h) == (COVER_W, COVER_H):
+                return path
+            ratio = COVER_W / COVER_H
+            if w / h > ratio:  # 太宽 → 裁两侧
+                nw = int(h * ratio)
+                left = (w - nw) // 2
+                im2 = im.crop((left, 0, left + nw, h))
+            else:  # 太高 → 裁上下
+                nh = int(w / ratio)
+                top = (h - nh) // 2
+                im2 = im.crop((0, top, w, top + nh))
+            im2 = im2.convert("RGB").resize((COVER_W, COVER_H), Image.LANCZOS)
+            im2.save(path)
+        return path
+    except Exception:  # noqa: BLE001
+        return path
 
 
 def _local_placeholder(task: str, prompt: str, **kwargs) -> GenResult:
@@ -180,8 +439,12 @@ def _local_placeholder(task: str, prompt: str, **kwargs) -> GenResult:
 
         # 底部标注尺寸
         d.text((90, COVER_H - 140), f"{COVER_W}x{COVER_H} (3:4)", fill=(90, 60, 30))
-        short = prompt[:40].replace("\n", " ")
+        # 把提示词摘要画进图里 —— 这样即使不接真实API，
+        # 也能一眼看出「这张图用的什么提示词」，验证稿件→提示词是否串联
+        short = prompt[:60].replace("\n", " ")
         d.text((90, COVER_H - 100), short, fill=(110, 80, 50))
+        if len(prompt) > 60:
+            d.text((90, COVER_H - 76), prompt[60:120].replace("\n", " "), fill=(110, 80, 50))
 
         img.save(path)
         files.append(_rel(path))
@@ -198,26 +461,26 @@ def _local_placeholder(task: str, prompt: str, **kwargs) -> GenResult:
 
 # ── 对外接口 ──────────────────────────────────────────────
 
-def generate_cover(draft_id: int, title: str, style: str = "realistic") -> GenResult:
+def generate_cover(ctx: DraftContext, style: str = "realistic") -> GenResult:
     """生成封面（3 个候选，3:4）。"""
-    return _call_provider(
-        "cover", build_cover_prompt(title, style), count=COVER_CANDIDATES
-    )
+    prompt = build_cover_prompt(ctx, style)
+    return _call_provider("cover", prompt, count=COVER_CANDIDATES)
 
 
-def generate_inner(draft_id: int, title: str, count: int = 6) -> GenResult:
-    """生成内页（4-8 张，按九宫格顺序）。"""
+def generate_inner(ctx: DraftContext, count: int = 6) -> GenResult:
+    """生成内页（4-8 张，按顺序分配稿件信息点）。"""
     n = max(IMAGE_MIN, min(IMAGE_MAX, count))
     files: list[str] = []
     prompts: list[str] = []
     for i in range(1, n + 1):
-        p = build_inner_prompt(title, i, n)
+        p = build_inner_prompt(ctx, i, n)
         prompts.append(p)
         r = _call_provider("inner", p, count=1)
         files.extend(r.files)
     return GenResult(
         ok=True, kind="inner", files=files,
-        prompt=prompts[0] if prompts else "", provider="local-placeholder",
+        prompt=prompts[0] if prompts else "", provider=PROVIDER_NAME,
+        meta={"count": n, "prompts": prompts},
     )
 
 

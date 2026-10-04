@@ -2,6 +2,13 @@
 
 统一走内核（Agent 编排），并解析 SSE 取文本。
 输出统一经 `_clean` 清洗 —— 小模型会把思考过程一起吐出来。
+
+★★ 凭据有两种，别混（这个坑踩过一次，表现为「AI 写作全线 401」）：
+  1. **内核凭据**（hbridge 静态 token）—— 我们连内核时用，
+     来自 `settings.kernel_auth_headers`。
+  2. **模型密钥**（DEEPSEEK_API_KEY）—— 是给*内核*去调模型的，
+     拿它当内核凭据会被 401。
+  之前误用了第 2 种，导致标题/打磨/标签三个功能全挂。
 """
 
 from __future__ import annotations
@@ -19,8 +26,8 @@ from app.core.config import settings
 
 # ── 内核调用 ────────────────────────────────────────────
 
-def _api_key() -> str:
-    """内核鉴权凭据：环境变量优先（与内核自身优先级一致）。"""
+def _model_key() -> str:
+    """模型密钥（给内核调模型用），**不是**内核的接入凭据。"""
     k = os.environ.get("DEEPSEEK_API_KEY", "").strip()
     if k:
         return k
@@ -35,10 +42,8 @@ def _api_key() -> str:
 
 async def ask(prompt: str, session: str | None = None, timeout: int = 180) -> str:
     """向内核提问，返回清洗后的纯文本。"""
-    headers = {"content-type": "application/json"}
-    key = _api_key()
-    if key:
-        headers["authorization"] = f"Bearer {key}"
+    # ★ 走 settings.kernel_auth_headers —— 内核接入凭据的唯一来源
+    headers = {"content-type": "application/json", **settings.kernel_auth_headers}
 
     payload: dict[str, Any] = {"text": prompt}
     if session:
@@ -56,10 +61,27 @@ async def ask(prompt: str, session: str | None = None, timeout: int = 180) -> st
         ) from exc
 
     if r.status_code != 200:
-        raise RuntimeError(f"内核返回 HTTP {r.status_code}：{r.text[:160]}")
+        raise RuntimeError(
+            f"内核返回 HTTP {r.status_code}：{r.text[:160]}"
+            + (
+                "\n提示：内核鉴权失败。检查 settings.kernel_token，"
+                "或 kernel_patch_file 是否指向内核 profile 的 cordis.patch.yml。"
+                if r.status_code == 401
+                else ""
+            )
+        )
 
+    # ★ 按 event 行区分 text-delta 与 reasoning-delta。
+    #   原来只要 data 里有 text 就收，结果把模型的思考过程当正文返回了。
     parts: list[str] = []
+    pending_event: str | None = None
     for line in r.text.splitlines():
+        line = line.strip()
+        if not line:
+            continue
+        if line.startswith("event:"):
+            pending_event = line[6:].strip()
+            continue
         if not line.startswith("data:"):
             continue
         raw = line[5:].strip()
@@ -69,6 +91,17 @@ async def ask(prompt: str, session: str | None = None, timeout: int = 180) -> st
             o = json.loads(raw)
         except json.JSONDecodeError:
             continue
+
+        kind = pending_event
+        if kind is None:
+            # 兜底：没 event 行时看载荷里的 kind/type
+            kind = str(o.get("type") or "")
+        if kind and kind != "text-delta":
+            # 明确不是正文（reasoning-delta / tool-call / turn-start 等）→ 跳过
+            pending_event = None
+            continue
+        pending_event = None
+
         t = o.get("text")
         if isinstance(t, str):
             parts.append(t)
@@ -125,23 +158,120 @@ def _clean(text: str) -> str:
 
 # ── 1. 批量爆款标题 ────────────────────────────────────
 
-TITLE_PROMPT = """你���小红书爆款标题写手。为下面这个选题一次性生成 **{n} 个**标题候选。
+# ★ 重构思路（原来只给一句"写10个爆款标题"，模型自由发挥，实测不可用）：
+#   1) 给**公式库**而不是形容词—— 明确 6 种爆款公式，各自的结构模板
+#   2) 给**反例**—— 列出实测不合格的写法，让模型避开
+#   3) **确定性校验+ 自动重写**—— 拿到结果先本地校验，不合格的不放行
+#   4) 埋词要求从"前8-13字含整个长尾词"改成"含核心词"——
+#      多词长尾词（如「充电桩 排队」）整串塞进标题必超20 字且读不通
+
+TITLE_FORMULAS = """1. **人群+痛点**：「打工人{核心词}踩的坑」—— 直接点名人群
+2. **数字+结果**：「{核心词}的 3 个关键判断」—— 有具体数字更可信
+3. **反常识**：「{核心词}其实是智商税」—— 打破惯性认知
+4. **提问代入**：「{核心词}到底该怎么选？」—— 疑问句点击率高
+5. **场景代入**：「国庆去-service {核心词}」—— 锁定具体场景
+6. **避坑清单**：「{核心词}千万别踩这 3 个坑」—— 损失厌恶"""
+
+TITLE_PROMPT = """你是小红书爆款标题写手。为下面这个选题一次性生成 **{n} 个**标题候选。
 
 【选题】{topic}
 【目标人群】{persona}
 【价值类型】{vtype}
+【必须包含的核心词】{core}
 
-标题硬性要求：
-- 每个 **不超过 20 个字**
-- **前 8-13 字**必须包含长尾关键词「{keyword}」
-- 公式多样性：人群+痛点、数字+结果、反常识、提问代入、场景代入
-- 不得出现极限词与导流话术
-- 不得编造数据或虚假承诺
+标题硬性要求（**每一条都必须满足**）：
+1. 每个标题 **不超过 20 个字**（含标点）
+2. 核心词「{core}」必须出现在标题的**前 10 个字内**（搜索权重第一来源）
+3. 必须使用下面 6 种爆款公式中的至少 4 种，**不要重复同一种公式**：
+{formulas}
+4. 禁止极限词（最/第一/绝对/全网最好）、禁止导流话术、禁止编造数据
+5. 像人写的，不要书面语，不要「探讨」「解析」这类空词
+
+【反面示例（不要这样写）】
+- 「{topic}的全面分析与详细介绍」—— 书面语、无钩子、无公式
+- 「如何{core}？一篇讲清」—— 废话开头，没有具体信息
+- 「{core}技巧大全」—— 太泛，缺少人群或场景锚点
 
 **只输出 JSON 数组**，每项是一个字符串，格式：
 ["标题1","标题2",...{n}项]
 
 不要输出解释、不要 markdown 代码块。"""
+
+
+def _core_terms(keyword: str) -> list[str]:
+    """把长尾词拆成可埋入标题的核心词。
+
+    与 draft_validator._keyword_terms 同源 —— 校验器和生成器必须用同一套
+    拆词规则，否则「生成出来的标题」过不了「自己的校验器」。
+    """
+    if not keyword:
+        return []
+    terms = [t for t in re.split(r"[\s、,，/|+]+", keyword) if t]
+    if not terms:
+        return [keyword]
+    terms.sort(key=len, reverse=True)
+    return terms[:2]
+
+
+def score_title(title: str, core_terms: list[str]) -> tuple[bool, list[str]]:
+    """标题确定性校验：返回 (是否合格, 问题列表)。
+
+    ★ 与 prompt 里的要求一一对应 —— prompt 说了什么，这里就查什么。
+      只靠模型自觉是不够的，实测它会超字数、漏埋词。
+    """
+    issues: list[str] = []
+    t = (title or "").strip().strip('「」"')
+    if not t:
+        return False, ["空标题"]
+    if len(t) > 20:
+        issues.append(f"{len(t)}字超上限")
+    if core_terms:
+        pos = min((t.find(c) for c in core_terms if c in t), default=-1)
+        if pos == -1:
+            issues.append("未含核心词")
+        elif pos > 10:
+            issues.append(f"核心词在第{pos + 1}字，应在前10字内")
+    # 空话开头（模型爱写）
+    for bad in ("如何", "浅谈", "探讨", "解析", "全面分析", "详细介绍", "一篇讲清"):
+        if t.startswith(bad):
+            issues.append(f"以空词「{bad}」开头")
+            break
+    return (not issues), issues
+
+
+def _strip_title(t: str) -> str:
+    """去掉模型常见的包裹符号与编号前缀。"""
+    s = (t or "").strip()
+    s = re.sub(r"^\s*\d+\s*[.、)）]\s*", "", s)
+    s = s.strip().strip("「」\"'“”‘’ ")
+    return s
+
+
+def _parse_title_list(text: str) -> list[str]:
+    """从模型输出里抽出标题列表（JSON 优先，退回按行）。"""
+    m = re.search(r"\[[\s\S]*?\]", text)
+    if m:
+        try:
+            arr = json.loads(m.group(0))
+            out = [_strip_title(str(x)) for x in arr]
+            out = [x for x in out if x]
+            if out:
+                return out
+        except json.JSONDecodeError:
+            pass
+
+    out = []
+    for line in text.splitlines():
+        s = _strip_title(line)
+        if not s:
+            continue
+        # 单行可能含多个引号分隔的标题
+        parts = re.findall(r'[""「」]([^""「」]{4,30})[""「」]', line)
+        if parts:
+            out.extend(_strip_title(p) for p in parts)
+        elif 4 <= len(s) <= 30:
+            out.append(s)
+    return out
 
 
 async def gen_titles(
@@ -152,31 +282,58 @@ async def gen_titles(
     n: int = 10,
     session: str | None = None,
 ) -> list[str]:
-    """一次性生成 n 个爆款标题候选。"""
+    """一次性生成 n 个爆款标题候选（**带确定性校验**）。
+
+    流程：生成 → 本地校验 → 不合格的丢弃并标记 → 不足则补生成一轮。
+    这样返回给用户的**至少都是能过校验器**的标题。
+    """
+    core = _core_terms(keyword)
+    core_str = "、".join(core) if core else keyword
+
     prompt = TITLE_PROMPT.format(
-        n=n, topic=topic, persona=persona or "不限", vtype=vtype, keyword=keyword
+        n=n, topic=topic, persona=persona or "不限", vtype=vtype,
+        core=core_str, formulas=TITLE_FORMULAS,
     )
     text = await ask(prompt, session=session)
+    raw = _parse_title_list(text)
 
-    # 抽取 JSON 数组（模型可能带 markdown 或前后废话）
-    m = re.search(r"\[[\s\S]*?\]", text)
-    if m:
+    # ── 确定性校验 + 去重 ──
+    good: list[str] = []
+    seen: set[str] = set()
+    rejected: list[dict] = []
+    for t in raw:
+        ok, issues = score_title(t, core)
+        key = re.sub(r"[^\w一-鿿]", "", t)
+        if not ok:
+            rejected.append({"title": t, "issues": issues})
+            continue
+        if key in seen:
+            continue
+        seen.add(key)
+        good.append(t)
+
+    # ── 不足则补一轮（把不合格的作为反例喂回去）──
+    if len(good) < n:
+        retry = prompt
+        if rejected:
+            retry += (
+                "\n\n【上一轮不合格示例（不要重复这些问题）】\n"
+                + "\n".join(f"- {r['title']}：{'、'.join(r['issues'])}" for r in rejected[:5])
+            )
         try:
-            arr = json.loads(m.group(0))
-            titles = [str(x).strip() for x in arr if str(x).strip()]
-            if titles:
-                return titles[:n]
-        except json.JSONDecodeError:
-            pass
+            text2 = await ask(retry, session=session)
+            for t in _parse_title_list(text2):
+                ok, _ = score_title(t, core)
+                key = re.sub(r"[^\w一-鿿]", "", t)
+                if ok and key not in seen:
+                    seen.add(key)
+                    good.append(t)
+                    if len(good) >= n:
+                        break
+        except Exception:  # noqa: BLE001
+            pass  # 补生成失败不影响已拿到的结果
 
-    # 兜底：按行拆
-    out: list[str] = []
-    for line in text.splitlines():
-        s = re.sub(r"^[\s\-\*\d\.、\)]+", "", line).strip().strip('「」"')
-        s = re.sub(r"\d+\.\s*", "", s)
-        if 4 <= len(s) <= 30:
-            out.append(s)
-    return out[:n] or [topic]
+    return good[:n]
 
 
 # ── 2. 多轮打磨 ────────────────────────────────────────

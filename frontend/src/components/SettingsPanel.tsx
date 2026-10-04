@@ -1,8 +1,10 @@
 import { useState } from 'react'
 import { FeedsManager } from './FeedsManager'
 import { ApiProfiles } from './ApiProfiles'
+import { ImageApiSettings } from './ImageApiSettings'
+import { Button } from './ui'
 
-/** 设置抽屉：双标签页 —— API 配置 / RSS 源。
+/** 设置抽屉：三个标签页 —— 文字模型 / 生图 API / RSS 源。
  *
  * 需求对应：
  *  1. 配置表单（名称/BaseURL/Key/模型）+ 多套切换 + 加密存储 → ApiProfiles
@@ -10,7 +12,8 @@ import { ApiProfiles } from './ApiProfiles'
  *  3. 模型清单拉取 + 手动兜底 → ApiProfiles
  *  4. 模型下拉（搜索/联动/生效态）→ ApiProfiles
  *  5. 加载态/防重复提交 → ApiProfiles
- * RSS 源管理 → FeedsManager
+ *  生图服务（与文字模型分开：协议/计费/密钥都不同）→ ImageApiSettings
+ *  RSS 源管理 → FeedsManager
  */
 export function SettingsPanel({
   open,
@@ -23,7 +26,7 @@ export function SettingsPanel({
   onNotify: (kind: 'ok' | 'err', msg: string) => void
   onSaved: () => void
 }) {
-  const [tab, setTab] = useState<'api' | 'feeds'>('api')
+  const [tab, setTab] = useState<'api' | 'image' | 'feeds'>('api')
 
   if (!open) return null
 
@@ -45,7 +48,7 @@ export function SettingsPanel({
               设置
             </div>
             <div className="mt-0.5 text-[11px] text-stone-400">
-              API 配置与数据源
+              文字模型、生图服务与数据源
             </div>
           </div>
           <button
@@ -68,7 +71,8 @@ export function SettingsPanel({
         <div className="flex shrink-0 gap-1 border-b border-[var(--border)] px-5">
           {(
             [
-              ['api', 'API 配置'],
+              ['api', '文字模型'],
+              ['image', '生图 API'],
               ['feeds', 'RSS 源'],
             ] as const
           ).map(([k, label]) => (
@@ -88,18 +92,16 @@ export function SettingsPanel({
 
         {/* 内容 */}
         <div className="min-h-0 flex-1 space-y-5 overflow-y-auto px-5 py-4">
-          {tab === 'feeds' ? (
-            <FeedsManager onNotify={onNotify} />
-          ) : (
-            <ApiProfiles onNotify={onNotify} onChanged={onSaved} />
-          )}
+          {tab === 'feeds' && <FeedsManager onNotify={onNotify} />}
+          {tab === 'image' && <ImageApiSettings onNotify={onNotify} />}
+          {tab === 'api' && <ApiProfiles onNotify={onNotify} onChanged={onSaved} />}
         </div>
 
         {/* 底部 */}
         <div className="flex shrink-0 gap-2 border-t border-[var(--border)] px-5 py-3">
-          <button className="btn btn-ghost flex-1" onClick={onClose}>
+          <Button variant="default" size="md" className="flex-1" onClick={onClose}>
             关闭
-          </button>
+          </Button>
         </div>
       </div>
     </>

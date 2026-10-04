@@ -13,7 +13,7 @@ from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.staticfiles import StaticFiles
 
-from app.api import agent, agent_data, ai, analytics, assets, bridge, drafts, feeds, pipeline, publish
+from app.api import agent, agent_data, ai, analytics, assets, bridge, drafts, feeds, knowledge, pipeline, publish
 from app.api import settings as settings_api
 from app.core.config import settings
 from app.db.session import init_db
@@ -69,6 +69,8 @@ app.include_router(ai.router)
 app.include_router(feeds.router)
 # 系统设置：内核 API Key / 模型 / 界面偏好
 app.include_router(settings_api.router)
+
+app.include_router(knowledge.router)
 
 
 # ── 生成的素材静态服务（封面/内页/视频）────────────────────

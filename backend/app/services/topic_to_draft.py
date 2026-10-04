@@ -100,17 +100,62 @@ def topic_context(db: Session, topic_id: int) -> dict:
 
 
 def _build_brief(topic: Topic) -> str:
-    """把选题要素拼成写作简报（喂给 AI 生成用）。"""
+    """把选题要素拼成写作简报（喂给 AI 生成用）。
+
+    ★ 重构：原来只给了题材和一句「三段式」，太抽象 ——
+      实测模型交出的是「正确但平庸」的稿子：结构松散、字数贴边、
+      开头是「大家好」这类无效钩子。
+      现在给**可执行的规格**：分段结构、每段写什么、字数分配、
+      风格约束、明确的开头与结尾写法。
+    """
+    import re as _re
+
     parts: list[str] = []
+
     if topic.keyword_target:
-        parts.append(f"目标长尾词：{topic.keyword_target}（须出现在标题前 8-13 字与正文前 80 字）")
+        terms = [t for t in _re.split(r"[\s、,，/|+]+", topic.keyword_target) if t]
+        terms.sort(key=len, reverse=True)
+        core = "、".join(terms[:2]) if terms else topic.keyword_target
+        parts.append(
+            f"【目标长尾词】{topic.keyword_target}\n"
+            f"  → 其中核心词「{core}」必须出现在：标题前 10 字内、正文前 80 字内，"
+            f"全文自然出现 2-3 次（不要堆砌，超过 3 次可能限流）"
+        )
     if topic.persona:
-        parts.append(f"目标人群：{topic.persona}")
+        parts.append(f"【目标人群】{topic.persona}（第二人称「你」对话，读者要有「说的就是我」的代入感）")
     if topic.value_type:
-        parts.append(f"价值类型：{topic.value_type}")
+        parts.append(f"【价值类型】{topic.value_type}")
     if topic.differentiation:
-        parts.append(f"差异化要求：{'、'.join(topic.differentiation)}（至少满足 3 项）")
-    parts.append("正文 300-800 字，三段式：痛点开场 → 分点干货 → 结尾互动")
-    parts.append("标签 3-5 个，覆盖品类词/场景词/人群词")
-    parts.append("禁止：站外导流、极限词、编造个人经历")
+        parts.append(f"【差异化要求】{'、'.join(topic.differentiation)}（至少满足 3 项，不要写成泛泛而谈）")
+
+    parts.append(
+        """
+【正文结构（严格四段，字数已分配）】
+1. **钩子开头（60-100字）**：第一句必须是痛点、反常识或具体场景。
+   ✗ 禁止：「大家好」「今天分享」「最近很多姐妹问我」这类无效开场
+   ✓ 示例：「排队 40 分钟才发现，这个地方根本不用去。」
+2. **共鸣展开（60-100字）**：把痛点说透，让目标人群对号入座。
+   要有具体的个人化细节（我踩过的坑、当时的犹豫、真实场景）。
+3. **干货主体（150-350字）**：分 3 点，每点一行小标题 + 具体做法。
+   每点必须给**可执行的动作**，不是「要注意质量」这种空话。
+4. **收尾（40-80字）**：一句总结 + 一个自然的行动建议。
+   ✗ 禁止：「关注我」「评论区扣 1」「点赞收藏」等导流话术（平台判违规）
+   ✓ 示例：「把这三个判断记住，下次逛超市能省半小时。」
+
+【字数】全文 380-650 字（硬性要求，低于 300 会被折叠，高于 800 完读率掉）
+
+【风格要求】
+- 像真人写的笔记，不是文章：多用短句（15字内），少用书面语
+- 具体 > 抽象：写「排队 40 分钟」不写「耗费大量时间」
+- 不要排比句、不要「不仅…而且…」「总而言之」这类连接词
+- 不要用 emoji 堆砌，最多 0-2 个
+
+【标签】3-5 个，混合三类：品类词（买什么）、场景词（什么场合）、人群词（谁用）
+
+【禁止事项】
+- 站外导流（微信/电话/二维码/私信）—— 平台处罚最重
+- 极限词（最/第一/绝对/全网最好）
+- 医疗功效、绝对化承诺
+- 编造具体数字或虚假经历""".strip()
+    )
     return "\n".join(parts)

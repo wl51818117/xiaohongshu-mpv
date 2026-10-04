@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useState } from 'react'
 import { type Draft, type Validation } from '../lib/api'
-import { DiffBadge, EmptyState, SectionTitle, Tag, ValueTypeBadge } from './ui'
+import { Button, DiffBadge, EmptyState, SectionTitle, Tag, ValueTypeBadge } from './ui'
 
 /** 打磨动作标签（与后端 POLISH_ACTIONS 对应）*/
 const POLISH_LABELS: Record<string, string> = {
@@ -260,24 +260,28 @@ export function WritingDesk({
   return (
     <>
       <div className="mb-4 flex items-center justify-between gap-3">
-        <button className="btn-ghost btn-sm" onClick={onBack}>
+        <Button variant="default" size="sm" onClick={onBack}>
           ← 返回选题库
-        </button>
+        </Button>
         <div className="flex items-center gap-2">
-          <button
-            className="btn-accent btn-sm"
+          <Button
+            variant="subtle"
+            size="sm"
+            loading={busy === 'ai'}
             disabled={busy !== null}
             onClick={() => void generate()}
           >
-            {busy === 'ai' ? '生成中…' : body ? 'AI 重新生成' : 'AI 生成正文'}
-          </button>
-          <button
-            className="btn-primary btn-sm"
+            {body ? 'AI 重新生成' : 'AI 生成正文'}
+          </Button>
+          <Button
+            variant="primary"
+            size="sm"
+            loading={busy === 'save'}
             disabled={busy !== null}
             onClick={() => void save()}
           >
-            {busy === 'save' ? '保存中…' : '保存'}
-          </button>
+            保存
+          </Button>
         </div>
       </div>
 
@@ -354,13 +358,16 @@ export function WritingDesk({
                 className="field flex-1"
                 placeholder="≤20 字，长尾词放前 8-13 字"
               />
-              <button
-                className="btn-accent shrink-0"
+              <Button
+                variant="primary"
+                size="sm"
+                className="shrink-0"
+                loading={busy === 'titles'}
                 disabled={busy !== null}
                 onClick={() => void genTitles()}
               >
-                {busy === 'titles' ? '生成中…' : 'AI 出 10 个标题'}
-              </button>
+                AI 出 10 个标题
+              </Button>
             </div>
 
             {/* 标题候选：用户自己挑 */}
@@ -370,12 +377,13 @@ export function WritingDesk({
                   <span className="text-[11px] font-medium text-stone-500">
                     标题候选（点一个采用）
                   </span>
-                  <button
-                    className="btn-ghost !px-1.5 !py-0.5 !text-[10px]"
+                  <Button
+                    variant="ghost"
+                    size="xs"
                     onClick={() => setTitleOptions([])}
                   >
                     收起
-                  </button>
+                  </Button>
                 </div>
                 <div className="grid gap-1">
                   {titleOptions.map((t, i) => (
@@ -422,14 +430,16 @@ export function WritingDesk({
               <div className="mb-2 flex flex-wrap items-center gap-1.5">
                 <span className="text-[11px] text-stone-400">AI 打磨：</span>
                 {POLISH_ACTIONS.map((a) => (
-                  <button
+                  <Button
                     key={a.key}
-                    className="btn-ghost !min-h-[26px] !px-2 !py-0.5 !text-[11px]"
+                    variant="default"
+                    size="xs"
+                    loading={busy === a.key}
                     disabled={busy !== null}
                     onClick={() => void polish(a.key)}
                   >
-                    {busy === a.key ? '处理中…' : a.label}
-                  </button>
+                    {a.label}
+                  </Button>
                 ))}
               </div>
             )}
@@ -449,13 +459,15 @@ export function WritingDesk({
             <div className="mt-4">
               <div className="mb-1.5 flex items-center justify-between">
                 <label className="field-label !mb-0">标签（3-5 个）</label>
-                <button
-                  className="btn-accent !min-h-[26px] !px-2 !py-0.5 !text-[11px]"
+                <Button
+                  variant="subtle"
+                  size="xs"
+                  loading={busy === 'tags'}
                   disabled={busy !== null}
                   onClick={() => void genTags()}
                 >
-                  {busy === 'tags' ? '推荐中…' : '智能推荐标签'}
-                </button>
+                  智能推荐标签
+                </Button>
               </div>
               <input
                 value={tagsText}
@@ -540,13 +552,16 @@ export function WritingDesk({
                   placeholder="告诉 AI 想怎么改…"
                   className="field flex-1 !min-h-[34px] !py-1.5 !text-xs"
                 />
-                <button
-                  className="btn-primary shrink-0 !min-h-[34px] !px-3 !py-1.5 !text-xs"
+                <Button
+                  variant="primary"
+                  size="sm"
+                  className="shrink-0"
+                  loading={busy === 'chat'}
                   disabled={busy !== null || !chatInput.trim()}
                   onClick={() => void sendChat()}
                 >
-                  {busy === 'chat' ? '处理中' : '发送'}
-                </button>
+                  发送
+                </Button>
               </div>
             </div>
           )}
