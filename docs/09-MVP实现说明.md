@@ -45,13 +45,23 @@ RSS 源 ──> ① 采集入库 ──> ② AI选题转换 ──> ③ 选题�
 | 数据层 | SQLAlchemy 2 + SQLite | **MVP 用 SQLite 零依赖**；生产改 PostgreSQL 只改 `DATABASE_URL` |
 | RSS | feedparser | 文档定：Python 生态首选 |
 | 内核 | dsh harness @ 8787 | 本机已在运行 |
-| 前端 | **暂不做** | MVP 用 API + /docs 验证，前端属 P5+ |
+| 前端 | **Vite 6 + React 19 + TS + Tailwind 4** | 前后端分离，`/api` 代理到 8000 |
 
 ---
 
 ## 三、启动与验证
 
-### 方式一：一键脚本（Windows）
+### 方式零：一键启动前后端（推荐）
+
+```bash
+# 项目根目录双击
+start-all.bat
+```
+
+自动启动后端(8000) + 前端(5173) 并打开浏览器。
+**前端界面：<http://127.0.0.1:5173>**
+
+### 方式一：后端单启（Windows）
 
 ```bash
 cd backend
