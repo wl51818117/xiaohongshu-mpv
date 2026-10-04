@@ -11,7 +11,7 @@ from contextlib import asynccontextmanager
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 
-from app.api import agent, agent_data, pipeline
+from app.api import agent, agent_data, drafts, pipeline
 from app.core.config import settings
 from app.db.session import init_db
 
@@ -50,6 +50,8 @@ app.include_router(pipeline.router)
 app.include_router(agent.router)
 # Agent 写入接口：内核工具通过它把产出落库
 app.include_router(agent_data.router)
+# 稿件接口：文案编辑与规格校验
+app.include_router(drafts.router)
 
 
 @app.get("/", summary="服务信息")
