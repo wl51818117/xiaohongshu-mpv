@@ -36,7 +36,7 @@ export function FlowCanvas({ kind, statuses, onEnter }: Props) {
       height: TOP_Y + NODE_H + 70,
       grid: false,
       panning: false,
-      background: { color: '#FAFAF9' },
+      background: { color: '#ffffff' },
     })
     graphRef.current = graph
 
@@ -79,7 +79,7 @@ export function FlowCanvas({ kind, statuses, onEnter }: Props) {
         connector: 'smooth',
         attrs: {
           line: {
-            stroke: '#D6D3D1',
+            stroke: '#d4d4d8',
             strokeWidth: 1.6,
             targetMarker: { name: 'block', width: 9, height: 7 },
             lineDash: '5 4',
@@ -145,7 +145,7 @@ export function FlowCanvas({ kind, statuses, onEnter }: Props) {
       if (d?.isNode?.()) {
         d.attr({
           body: { fill: 'transparent', stroke: 'transparent' },
-          label: { fill: '#A8A29E', fontSize: 11, textWrap: { width: NODE_W - 8 } },
+          label: { fill: '#a1a1aa', fontSize: 11, textWrap: { width: NODE_W - 8 } },
         })
       }
     })
@@ -159,7 +159,8 @@ export function FlowCanvas({ kind, statuses, onEnter }: Props) {
         (statuses[nodes[i + 1].id] ?? 'pending') === 'done'
       edge.attr({
         line: {
-          stroke: solid ? '#10B981' : '#D6D3D1',
+          // 两端都完成才用实线品牌紫，否则中性灰虚线
+          stroke: solid ? '#7c3aed' : '#d4d4d8',
           lineDash: solid ? undefined : '5 4',
         },
       })

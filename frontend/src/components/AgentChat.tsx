@@ -96,9 +96,9 @@ export function AgentChat({
   return (
     <div className="flex h-full min-h-0 flex-col bg-white">
       {/* 侧栏头部 */}
-      <div className="flex shrink-0 items-center justify-between border-b border-stone-200 px-4 py-3">
+      <div className="flex shrink-0 items-center justify-between border-b border-[var(--border)] bg-[var(--surface-2)] px-4 py-3">
         <div className="flex items-center gap-2">
-          <span className="text-sm font-semibold text-stone-900">Agent</span>
+          <span className="text-sm font-semibold text-stone-900 dark:text-stone-50">Agent</span>
           <span
             className={`h-1.5 w-1.5 rounded-full ${
               online ? 'bg-emerald-500' : 'bg-stone-300'
@@ -112,8 +112,8 @@ export function AgentChat({
           <button
             onClick={onClose}
             aria-label="收起 Agent 侧栏"
-            className="rounded-md p-1 text-stone-400 transition-colors
-                       hover:bg-stone-100 hover:text-stone-700"
+            className="rounded-lg p-1.5 text-stone-400 transition-colors
+                       hover:bg-stone-200/60 hover:text-stone-700 dark:hover:bg-zinc-800"
           >
             {/* 收起图标：右向箭头 */}
             <svg width="16" height="16" viewBox="0 0 16 16" fill="none">
@@ -132,7 +132,7 @@ export function AgentChat({
       {/* 消息区：flex-1 + 独立滚动 */}
       <div
         ref={scrollRef}
-        className="min-h-0 flex-1 space-y-3 overflow-y-auto px-4 py-4"
+        className="min-h-0 flex-1 space-y-3 overflow-y-auto px-4 py-4 bg-[var(--surface)]"
       >
         {msgs.length === 0 && (
           <div className="py-8 text-center">
@@ -153,8 +153,8 @@ export function AgentChat({
             <div
               className={`max-w-[85%] whitespace-pre-wrap rounded-2xl px-3 py-2 text-sm leading-relaxed ${
                 m.role === 'user'
-                  ? 'bg-stone-900 text-white'
-                  : 'border border-stone-200 bg-stone-50 text-stone-800'
+                  ? 'bg-gradient-to-br from-[var(--grad-purple-from)] to-[var(--grad-purple-to)] text-white shadow-sm'
+                  : 'border border-[var(--border)] bg-[var(--surface-2)] text-stone-800'
               }`}
             >
               {m.text}
@@ -175,9 +175,9 @@ export function AgentChat({
       </div>
 
       {/* 输入区：固定底部，不参与滚动 */}
-      <div className="shrink-0 border-t border-stone-200 p-3">
+      <div className="shrink-0 border-t border-[var(--border)] bg-[var(--surface-2)] p-3">
         {!online && (
-          <div className="mb-2 rounded-lg bg-amber-50 px-2.5 py-1.5 text-xs leading-relaxed text-amber-800">
+          <div className="mb-2 rounded-lg bg-amber-50 px-2.5 py-1.5 text-xs leading-relaxed text-amber-800 dark:bg-amber-500/10 dark:text-amber-300">
             内核未启动。到
             <code className="mx-1">提取harness</code>
             目录双击 start-all.cmd。

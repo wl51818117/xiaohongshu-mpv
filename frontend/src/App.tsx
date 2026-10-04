@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useState } from 'react'
+import { useCallback, useEffect, useMemo, useState, type ReactNode } from 'react'
 import {
   api,
   type ConvertResult,
@@ -11,10 +11,10 @@ import {
 import {
   DiffBadge,
   EmptyState,
-  KernelDot,
   SectionTitle,
   StatCard,
   StatusBadge,
+  StatusDot,
   ValueTypeBadge,
 } from './components/ui'
 import { AgentChat } from './components/AgentChat'
@@ -254,113 +254,144 @@ export default function App() {
   }
 
   return (
-    <div className="relative flex h-full overflow-hidden">
-      {/* ── 左侧导航（窄屏隐藏，让位给主内容） ── */}
+    <div className="relative flex h-full overflow-hidden bg-[var(--bg)]">
+      {/* ── 左侧导航：紫色渐变 + 白色药丸选中态 ── */}
       <aside
         className={`${
           isNarrow ? 'hidden' : 'flex'
-        } w-56 shrink-0 flex-col border-r border-stone-200 bg-white`}
+        } w-[68px] shrink-0 flex-col items-center gap-2 bg-gradient-to-b from-[var(--grad-sidebar-from)] to-[var(--grad-sidebar-to)] py-4`}
       >
-        <div className="border-b border-stone-200 px-5 py-4">
-          <div className="text-sm font-semibold text-stone-900">电商工作台</div>
-          <div className="mt-0.5 text-xs text-stone-400">
-            小红书内容 · MVP
-          </div>
+        {/* Logo */}
+        <div className="mb-2 flex h-10 w-10 items-center justify-center rounded-xl bg-white/20 text-white backdrop-blur">
+          <svg width="20" height="20" viewBox="0 0 24 24" fill="none">
+            <path
+              d="M4 7.5A2.5 2.5 0 016.5 5h11A2.5 2.5 0 0120 7.5v9a2.5 2.5 0 01-2.5 2.5h-11A2.5 2.5 0 014 16.5v-9z"
+              stroke="currentColor"
+              strokeWidth="1.8"
+              strokeLinejoin="round"
+            />
+            <path
+              d="M8 9.5h8M8 13h5"
+              stroke="currentColor"
+              strokeWidth="1.8"
+              strokeLinecap="round"
+            />
+          </svg>
         </div>
 
-        <nav className="flex-1 p-2">
-          {TABS.map((t) => (
-            <button
-              key={t.key}
-              onClick={() => setTab(t.key)}
-              className={`mb-0.5 w-full rounded-lg px-3 py-2 text-left transition-colors ${
-                tab === t.key
-                  ? 'bg-stone-900 text-white'
-                  : 'text-stone-600 hover:bg-stone-100'
-              }`}
-            >
-              <div className="text-sm font-medium">{t.label}</div>
-              <div className="text-xs text-stone-400">{t.hint}</div>
-            </button>
-          ))}
+        {/* 导航图标：选中态为白色药丸 */}
+        <nav className="flex flex-1 flex-col items-center gap-1.5">
+          {TABS.map((t) => {
+            const active = tab === t.key
+            return (
+              <button
+                key={t.key}
+                onClick={() => setTab(t.key)}
+                title={`${t.label} · ${t.hint}`}
+                aria-label={t.label}
+                aria-current={active ? 'page' : undefined}
+                className={`group flex h-11 w-11 items-center justify-center rounded-2xl transition-all duration-200 ${
+                  active
+                    ? 'bg-white text-[var(--grad-sidebar-from)] shadow-lg'
+                    : 'text-white/70 hover:bg-white/15 hover:text-white'
+                }`}
+              >
+                <TabIcon tab={t.key} />
+              </button>
+            )
+          })}
         </nav>
 
-        <div className="border-t border-stone-200 px-5 py-3">
-          <KernelDot online={kernel?.ok ?? false} />
-          {kernel?.tools?.length ? (
-            <div className="mt-1 text-xs text-stone-400">
-              {kernel.tools.length} 个工具可用
-            </div>
-          ) : null}
-          <div className="mt-1.5 flex items-center gap-1.5 text-xs">
-            <span
-              className={`h-1.5 w-1.5 rounded-full ${
-                bridgeState === 'ready'
-                  ? 'bg-violet-500'
-                  : bridgeState === 'failed'
-                    ? 'bg-stone-300'
-                    : 'bg-amber-400'
-              }`}
-            />
-            <span className="text-stone-400">
-              {bridgeState === 'ready'
+        {/* 状态区 */}
+        <div className="flex flex-col items-center gap-2 border-t border-white/15 pt-3">
+          <span
+            className={`h-2 w-2 rounded-full ${
+              kernel?.ok ? 'bg-emerald-400' : 'bg-white/25'
+            }`}
+            title={kernel?.ok ? '内核在线' : '内核离线'}
+          />
+          <span
+            className={`h-2 w-2 rounded-full ${
+              bridgeState === 'ready'
+                ? 'bg-cyan-300'
+                : bridgeState === 'failed'
+                  ? 'bg-white/25'
+                  : 'bg-amber-300'
+            }`}
+            title={
+              bridgeState === 'ready'
                 ? '界面可被 Agent 操作'
                 : bridgeState === 'connecting'
-                  ? '桥接中…'
-                  : bridgeState === 'failed'
-                    ? '桥接未启用'
-                    : '桥接待命'}
-            </span>
-          </div>
+                  ? '桥接中'
+                  : '桥接未启用'
+            }
+          />
         </div>
       </aside>
 
-      {/* ── 中间主内容区（flex-1，Agent 展开也不被挤压） ── */}
-      <main className="min-w-0 flex-1 overflow-y-auto">
-        {/* 窄屏顶栏：显示当前页 + Agent 入口 */}
-        {isNarrow && (
-          <div className="sticky top-0 z-10 flex items-center justify-between border-b border-stone-200 bg-white/95 px-4 py-3 backdrop-blur">
+      {/* ── 主区 ── */}
+      <div className="flex min-w-0 flex-1 flex-col">
+        {/* 顶栏 */}
+        <header className="flex h-14 shrink-0 items-center gap-3 border-b border-[var(--border)] bg-white/80 px-6 backdrop-blur dark:bg-zinc-900/70">
+          {isNarrow && (
+            <span className="text-sm font-semibold text-stone-900 dark:text-stone-50">
+              {TABS.find((t) => t.key === tab)?.label}
+            </span>
+          )}
+          {!isNarrow && (
             <div>
-              <div className="text-sm font-semibold text-stone-900">
+              <div className="text-sm font-semibold text-stone-900 dark:text-stone-50">
                 {TABS.find((t) => t.key === tab)?.label}
               </div>
-              <div className="text-xs text-stone-400">
+              <div className="text-[11px] text-stone-400">
                 {TABS.find((t) => t.key === tab)?.hint}
               </div>
             </div>
+          )}
+
+          <div className="flex-1" />
+
+          {/* 状态徽章 */}
+          <span className="hidden items-center gap-1.5 rounded-full bg-brand-50 px-2.5 py-1 text-[11px] font-medium text-brand-700 sm:inline-flex dark:bg-brand-500/15 dark:text-brand-300">
+            <span className="h-1.5 w-1.5 rounded-full bg-brand-500" />
+            {kernel?.ok ? '内核在线' : '内核离线'}
+            {kernel?.tools?.length ? ` · ${kernel.tools.length} 工具` : ''}
+          </span>
+          <span className="hidden items-center gap-1.5 rounded-full bg-cyan-50 px-2.5 py-1 text-[11px] font-medium text-cyan-700 sm:inline-flex dark:bg-cyan-500/15 dark:text-cyan-300">
+            <span className="h-1.5 w-1.5 rounded-full bg-cyan-500" />
+            {bridgeState === 'ready' ? '界面可被 Agent 操作' : '桥接未启用'}
+          </span>
+
+          {/* 窄屏时的 Agent 入口 */}
+          {isNarrow && (
             <button
-              className="btn-ghost !px-2.5 !py-1.5"
+              className="btn btn-primary btn-sm"
               onClick={() => setAgentOpen(true)}
               aria-label="打开 Agent"
             >
-              <svg width="15" height="15" viewBox="0 0 16 16" fill="none">
-                <path
-                  d="M8 2.5C4.75 2.5 2.5 4.4 2.5 6.9c0 1.5.8 2.85 2.1 3.7l-.4 2.2 2.4-1.4c.47.08.95.12 1.4.12 3.25 0 5.5-1.9 5.5-4.62S11.25 2.5 8 2.5Z"
-                  stroke="currentColor"
-                  strokeWidth="1.3"
-                  strokeLinejoin="round"
-                />
-              </svg>
               Agent
             </button>
-          </div>
-        )}
-
-        <div className="mx-auto max-w-5xl px-8 py-6">
-          {/* 状态概览 */}
-          {status && (
-            <div className="mb-6 grid grid-cols-5 gap-3">
-              <StatCard label="素材" value={status.materials} />
-              <StatCard label="选题" value={status.topics} tone="accent" />
-              <StatCard
-                label="待转换"
-                value={status.unconverted_materials}
-                hint={status.unconverted_materials > 0 ? '需跑转换' : '已清空'}
-              />
-              <StatCard label="可执行选题" value={status.available_topics} />
-              <StatCard label="稿件" value={draftStat} tone={draftStat > 0 ? 'accent' : 'default'} />
-            </div>
           )}
+        </header>
+
+        {/* ── 主内容区 ── */}
+        <main className="min-w-0 flex-1 overflow-y-auto">
+          <div className="mx-auto max-w-6xl px-6 py-6">
+            {/* 状态概览：四色渐变卡，对齐参考稿的功能卡视觉 */}
+            {status && (
+              <div className="mb-6 grid grid-cols-2 gap-3 sm:grid-cols-3 lg:grid-cols-5">
+                <StatCard index={0} label="素材" value={status.materials} />
+                <StatCard index={1} label="选题" value={status.topics} />
+                <StatCard
+                  index={2}
+                  label="待转换"
+                  value={status.unconverted_materials}
+                  hint={status.unconverted_materials > 0 ? '需跑转换' : '已清空'}
+                />
+                <StatCard index={3} label="可执行" value={status.available_topics} />
+                <StatCard index={0} label="稿件" value={draftStat} />
+              </div>
+            )}
 
           {/* ── 流程图主页：图文与视频两条链路分开 ── */}
           {tab === 'flow' && (
@@ -371,7 +402,7 @@ export default function App() {
               />
 
               {/* 图文链路 */}
-              <div className="card mb-5 p-5">
+              <div className="card p-5">
                 <div className="mb-1 flex items-center gap-2">
                   <span className="rounded-md bg-sky-100 px-2 py-0.5 text-xs font-medium text-sky-700">
                     图文链路
@@ -496,7 +527,7 @@ export default function App() {
                         setTopicFilter((f) => ({ ...f, keyword: e.target.value }))
                       }
                       placeholder="按标题筛选"
-                      className="w-32 rounded-lg border border-stone-300 px-2.5 py-1.5 text-xs outline-none focus:border-stone-500"
+                      className="field !min-h-[34px] !w-32 !py-1.5 !text-xs"
                     />
                     <select
                       value={topicFilter.status ?? ''}
@@ -506,7 +537,7 @@ export default function App() {
                           status: e.target.value || undefined,
                         }))
                       }
-                      className="rounded-lg border border-stone-300 px-2 py-1.5 text-xs outline-none focus:border-stone-500"
+                      className="field !min-h-[34px] !py-1.5 !text-xs"
                     >
                       <option value="">全部状态</option>
                       <option value="pooled">可执行</option>
@@ -604,7 +635,7 @@ export default function App() {
                   {materials.map((m) => (
                     <div
                       key={m.id}
-                      className="card flex items-center gap-3 px-4 py-3"
+                      className="card card-hover flex items-center gap-3 px-4 py-3"
                     >
                       <div className="min-w-0 flex-1">
                         <div className="truncate text-sm text-stone-800">
@@ -710,10 +741,11 @@ export default function App() {
               {kernel && (
                 <div className="card mt-4 p-5">
                   <div className="mb-3 flex items-center justify-between">
-                    <div className="text-sm font-medium text-stone-900">
-                      内核工具清单
-                    </div>
-                    <KernelDot online={kernel.ok} />
+                    <div className="t-section">内核工具清单</div>
+                    <StatusDot
+                      online={kernel.ok}
+                      label={kernel.ok ? '在线' : '离线'}
+                    />
                   </div>
                   {kernel.ok ? (
                     <>
@@ -749,15 +781,16 @@ export default function App() {
               )}
             </>
           )}
-        </div>
-      </main>
+          </div>
+        </main>
+      </div>
 
       {/* ── Agent 侧栏 ──
           桌面端（≥1024px）：与主内容区并列的固定列，不占用主内容宽度
           窄屏（<1024px）：降级为右侧浮层 + 遮罩，不挤压主内容
       */}
       {!isNarrow && agentOpen && (
-        <aside className="w-[380px] shrink-0 animate-in border-l border-stone-200">
+        <aside className="w-[380px] shrink-0 animate-in border-l border-[var(--border)] bg-white dark:bg-zinc-900">
           <AgentChat
             online={kernel?.ok ?? false}
             onNotify={notify}
@@ -770,13 +803,14 @@ export default function App() {
       {isNarrow && agentOpen && (
         <>
           <div
-            className="fixed inset-0 z-30 bg-stone-900/30"
+            className="fixed inset-0 z-30 bg-stone-900/40 backdrop-blur-sm"
             onClick={() => setAgentOpen(false)}
             aria-hidden
           />
           <aside
             className="fixed inset-y-0 right-0 z-40 w-full max-w-[420px]
-                       animate-in border-l border-stone-200 shadow-xl"
+                       animate-in border-l border-[var(--border)] bg-white shadow-2xl
+                       dark:bg-zinc-900"
           >
             <AgentChat
               online={kernel?.ok ?? false}
@@ -793,8 +827,9 @@ export default function App() {
           onClick={() => setAgentOpen(true)}
           aria-label="展开 Agent 侧栏"
           className="fixed bottom-5 right-5 z-30 flex items-center gap-2 rounded-full
-                     bg-stone-900 px-4 py-2.5 text-sm font-medium text-white
-                     shadow-lg transition-colors hover:bg-stone-700"
+                     bg-gradient-to-br from-[var(--grad-purple-from)] to-[var(--grad-purple-to)]
+                     px-4 py-2.5 text-sm font-medium text-white shadow-lg
+                     transition-all hover:brightness-110 hover:shadow-xl"
         >
           <svg width="16" height="16" viewBox="0 0 16 16" fill="none">
             <path
@@ -821,7 +856,7 @@ export default function App() {
           <div
             className={`animate-in max-w-lg rounded-lg px-4 py-2.5 text-sm shadow-lg ${
               toast.kind === 'ok'
-                ? 'bg-stone-900 text-white'
+                ? 'bg-stone-900 text-white dark:bg-zinc-800'
                 : 'bg-red-600 text-white'
             }`}
           >
@@ -869,5 +904,82 @@ function StepLegend({
         )}
       </span>
     </div>
+  )
+}
+
+/** 侧栏导航图标：统一 24×24 线性风格，stroke 1.8 */
+function TabIcon({ tab }: { tab: string }) {
+  const p = {
+    stroke: 'currentColor',
+    strokeWidth: 1.8,
+    strokeLinecap: 'round' as const,
+    strokeLinejoin: 'round' as const,
+    fill: 'none',
+  }
+  const paths: Record<string, ReactNode> = {
+    // 流程图：节点连线
+    flow: (
+      <>
+        <rect x="3" y="4" width="6" height="5" rx="1.5" {...p} />
+        <rect x="15" y="4" width="6" height="5" rx="1.5" {...p} />
+        <rect x="9" y="16" width="6" height="5" rx="1.5" {...p} />
+        <path d="M9 6.5h6M6 9v4.5h6" {...p} />
+      </>
+    ),
+    // 流水线：齿轮 + 箭头
+    pipeline: (
+      <>
+        <path d="M4 7h5M13 7h7M4 17h9M17 17h3" {...p} />
+        <circle cx="11" cy="7" r="2" {...p} />
+        <circle cx="15" cy="17" r="2" {...p} />
+      </>
+    ),
+    // 素材库：堆叠
+    materials: (
+      <>
+        <rect x="4" y="4" width="12" height="12" rx="2" {...p} />
+        <path d="M8 20h10a2 2 0 002-2V8" {...p} />
+      </>
+    ),
+    // 选题库：灯泡
+    topics: (
+      <>
+        <path d="M9 18h6M10 21h4" {...p} />
+        <path d="M12 3a6 6 0 00-3.5 10.9c.5.4.8 1 .9 1.6h5.2c.1-.6.4-1.2.9-1.6A6 6 0 0012 3z" {...p} />
+      </>
+    ),
+    // 稿件：文档
+    draft: (
+      <>
+        <path d="M6 3h8l4 4v14a1 1 0 01-1 1H6a1 1 0 01-1-1V4a1 1 0 011-1z" {...p} />
+        <path d="M14 3v4h4M9 12h6M9 16h4" {...p} />
+      </>
+    ),
+    // 素材工坊：图片
+    assets: (
+      <>
+        <rect x="3" y="5" width="18" height="14" rx="2" {...p} />
+        <circle cx="9" cy="10" r="1.6" {...p} />
+        <path d="M3.5 17l5-4.5 4 3.5 3-2.5 5 4" {...p} />
+      </>
+    ),
+    // 发布队列：上传
+    publish: (
+      <>
+        <path d="M12 16V4M8 8l4-4 4 4" {...p} />
+        <path d="M4 15v4a1 1 0 001 1h14a1 1 0 001-1v-4" {...p} />
+      </>
+    ),
+    // 数据看板：柱状
+    analytics: (
+      <>
+        <path d="M4 20V9M10 20V4M16 20v-7M22 20H2" {...p} />
+      </>
+    ),
+  }
+  return (
+    <svg width="20" height="20" viewBox="0 0 24 24" aria-hidden>
+      {paths[tab] ?? paths.flow}
+    </svg>
   )
 }

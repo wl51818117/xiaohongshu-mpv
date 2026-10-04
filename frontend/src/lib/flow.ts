@@ -163,35 +163,39 @@ export function buildStepStatus(
   return out
 }
 
-/** 节点视觉配置（light 主题） */
+/** 节点视觉配置 —— 对齐紫色渐变主题。
+ *
+ * done 用品牌紫（与侧栏/统计卡呼应），active 用琥珀色强调，
+ * pending 保持中性灰，虚线边框表示未完成。
+ */
 export function nodeStyle(status: StepStatus) {
   switch (status) {
     case 'done':
       return {
-        fill: '#ECFDF5',
-        stroke: '#10B981',
-        text: '#065F46',
+        fill: '#f5f3ff',
+        stroke: '#7c3aed',
+        text: '#5b21b6',
         badge: '✓',
       }
     case 'active':
       return {
-        fill: '#FFF7ED',
-        stroke: '#EA580C',
-        text: '#9A3412',
+        fill: '#fffbeb',
+        stroke: '#f59e0b',
+        text: '#b45309',
         badge: '!',
       }
     case 'blocked':
       return {
-        fill: '#F5F5F4',
-        stroke: '#A8A29E',
-        text: '#78716C',
+        fill: '#f4f4f5',
+        stroke: '#a1a1aa',
+        text: '#71717a',
         badge: '×',
       }
     default:
       return {
-        fill: '#FFFFFF',
-        stroke: '#D6D3D1',
-        text: '#57534E',
+        fill: '#ffffff',
+        stroke: '#d4d4d8',
+        text: '#52525b',
         badge: '',
       }
   }

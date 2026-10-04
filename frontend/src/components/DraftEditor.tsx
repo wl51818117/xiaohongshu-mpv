@@ -214,8 +214,8 @@ export function DraftEditor({
                 onClick={() => void openDraft(d.id)}
                 className={`w-full rounded-lg px-2.5 py-2 text-left transition-colors ${
                   current?.id === d.id
-                    ? 'bg-stone-900 text-white'
-                    : 'hover:bg-stone-100'
+                    ? 'bg-gradient-to-br from-[var(--grad-purple-from)] to-[var(--grad-purple-to)] text-white shadow-sm'
+                    : 'hover:bg-stone-100 dark:hover:bg-zinc-800'
                 }`}
               >
                 <div className="truncate text-xs font-medium">
@@ -243,13 +243,13 @@ export function DraftEditor({
       <div className="card p-5">
         {!current && (
           <div className="mb-4">
-            <label className="mb-1 block text-xs text-stone-500">
+            <label className="field-label">
               关联选题（建稿后会占用该选题）
             </label>
             <select
               value={topicId ?? ''}
               onChange={(e) => setTopicId(Number(e.target.value) || null)}
-              className="w-full rounded-lg border border-stone-300 px-2.5 py-2 text-sm outline-none focus:border-stone-500"
+              className="field"
             >
               <option value="">不关联</option>
               {availableTopics.map((t) => (
@@ -263,7 +263,7 @@ export function DraftEditor({
 
         <div className="mb-3">
           <div className="mb-1 flex items-center justify-between">
-            <label className="text-xs text-stone-500">标题</label>
+            <label className="field-label !mb-0">标题</label>
             <span
               className={`text-xs tabular-nums ${
                 title.length > 20 ? 'text-red-600' : 'text-stone-400'
@@ -276,7 +276,7 @@ export function DraftEditor({
             value={title}
             onChange={(e) => setTitle(e.target.value)}
             placeholder="≤20 字，前 8-13 字含长尾词"
-            className="w-full rounded-lg border border-stone-300 px-3 py-2 text-sm outline-none focus:border-stone-500"
+            className="field"
           />
           {keyword && (
             <p className="mt-1 text-xs text-stone-400">
@@ -288,7 +288,7 @@ export function DraftEditor({
 
         <div className="mb-3">
           <div className="mb-1 flex items-center justify-between">
-            <label className="text-xs text-stone-500">正文</label>
+            <label className="field-label !mb-0">正文</label>
             <span
               className={`text-xs tabular-nums ${
                 body.length < 300 || body.length > 800
@@ -306,31 +306,31 @@ export function DraftEditor({
             placeholder={
               '三段式：开头 50 字直击痛点 → 中间分点给干货 → 结尾总结加互动提问\n前 80 字要出现目标长尾词'
             }
-            className="w-full resize-y rounded-lg border border-stone-300 px-3 py-2 text-sm leading-relaxed outline-none focus:border-stone-500"
+            className="field resize-y leading-relaxed"
           />
         </div>
 
         <div className="mb-3 grid grid-cols-2 gap-3">
           <div>
-            <label className="mb-1 block text-xs text-stone-500">
+            <label className="field-label">
               标签（顿号分隔，3-5 个）
             </label>
             <input
               value={tagsText}
               onChange={(e) => setTagsText(e.target.value)}
               placeholder="穿搭、通勤、上班族"
-              className="w-full rounded-lg border border-stone-300 px-2.5 py-2 text-sm outline-none focus:border-stone-500"
+              className="field"
             />
           </div>
           <div>
-            <label className="mb-1 block text-xs text-stone-500">
+            <label className="field-label">
               AI 声明（平台强制）
             </label>
             <input
               value={declaration}
               onChange={(e) => setDeclaration(e.target.value)}
               placeholder="本内容含 AI 辅助生成部分"
-              className="w-full rounded-lg border border-stone-300 px-2.5 py-2 text-sm outline-none focus:border-stone-500"
+              className="field"
             />
           </div>
         </div>
@@ -362,7 +362,7 @@ export function DraftEditor({
           {validation && (
             <span
               className={`text-sm font-semibold tabular-nums ${
-                validation.passed ? 'text-emerald-600' : 'text-amber-600'
+                validation.passed ? 'text-emerald-600 dark:text-emerald-400' : 'text-amber-600 dark:text-amber-400'
               }`}
             >
               {validation.score}
@@ -377,8 +377,8 @@ export function DraftEditor({
             <div
               className={`mb-3 rounded-lg px-3 py-2 text-xs font-medium ${
                 validation.passed
-                  ? 'bg-emerald-50 text-emerald-700'
-                  : 'bg-amber-50 text-amber-700'
+                  ? 'bg-emerald-50 text-emerald-700 dark:bg-emerald-500/10 dark:text-emerald-300'
+                  : 'bg-amber-50 text-amber-700 dark:bg-amber-500/10 dark:text-amber-300'
               }`}
             >
               {validation.passed ? '✓ 校验通过' : '还有待修正项'}
