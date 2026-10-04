@@ -76,3 +76,15 @@ Thumbs.db
 # ── 工作台内部记忆（本地运行态，不入库）──────────────────
 .workbuddy/memory/
 .workbuddy/tmp/
+
+# ── dsh 内核目录（含凭据与 profile 配置，绝不入库）──────
+.dsh/
+.harness-bridge.env
+kernel-backup-*/
+
+# ── 编辑器 /系统 ───────────────────────────────────────
+.vscode/
+.idea/
+*.swp
+.DS_Store
+Thumbs.db
