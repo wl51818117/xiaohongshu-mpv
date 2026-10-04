@@ -71,6 +71,49 @@ export type KernelStatus = {
   tools?: { name: string; source?: string; registered?: boolean }[]
 }
 
+// ── 稿件相关类型 ───────────────────────────────────────
+
+export type Validation = {
+  passed: boolean
+  spec_issues: string[]
+  compliance_issues: string[]
+  score: number
+  stats?: {
+    title_len: number
+    body_len: number
+    tag_count: number
+    keyword_hits: number
+  }
+}
+
+export type Draft = {
+  id: number
+  topic_id: number | null
+  pipeline_type: string
+  title: string
+  body: string
+  tags: string[]
+  cover_url?: string
+  images?: string[]
+  ai_declaration: string
+  validation: Validation
+  topic_title?: string
+  keyword?: string
+}
+
+export type DraftListItem = {
+  id: number
+  topic_id: number | null
+  pipeline_type: string
+  title: string
+  tags: string[]
+  ai_declaration: string
+  validation: Validation
+  topic_title: string
+  keyword: string
+  updated_at: string | null
+}
+
 // ── 接口 ──────────────────────────────────────────────
 
 export const api = {
@@ -92,6 +135,52 @@ export const api = {
     request<{ count: number; items: Material[] }>(`/materials?limit=${limit}`),
 
   kernel: () => request<KernelStatus>('/agent/kernel'),
+
+  // ── 稿件 ──
+  drafts: (limit = 50) =>
+    request<{ count: number; items: DraftListItem[] }>(`/drafts?limit=${limit}`),
+
+  draft: (id: number) => request<Draft>(`/drafts/${id}`),
+
+  createDraft: (payload: {
+    topic_id?: number | null
+    pipeline_type?: string
+    title?: string
+    body?: string
+    tags?: string[]
+  }) =>
+    request<{ ok: boolean; id: number; validation: Validation }>('/drafts', {
+      method: 'POST',
+      body: JSON.stringify(payload),
+    }),
+
+  updateDraft: (payload: {
+    id: number
+    title?: string
+    body?: string
+    tags?: string[]
+    ai_declaration?: string
+  }) =>
+    request<{ ok: boolean; id: number; validation: Validation }>('/drafts', {
+      method: 'PATCH',
+      body: JSON.stringify(payload),
+    }),
+
+  deleteDraft: (id: number) =>
+    request<{ ok: boolean }>(`/drafts/${id}`, { method: 'DELETE' }),
+
+  /** 实时校验，不保存 */
+  validateDraft: (payload: {
+    title: string
+    body: string
+    tags: string[]
+    keyword: string
+    ai_declaration: string
+    pipeline_type?: string
+  }) => request<Validation>('/drafts/validate', {
+    method: 'POST',
+    body: JSON.stringify(payload),
+  }),
 }
 
 /** Agent 对话：SSE 流式读取。

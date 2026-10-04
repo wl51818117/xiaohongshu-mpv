@@ -21,6 +21,7 @@ import { AgentChat } from './components/AgentChat'
 import { BREAKPOINT_NARROW, useMediaQuery } from './hooks/useMediaQuery'
 import { FlowCanvas } from './components/FlowCanvas'
 import { PageScaffold } from './components/PageScaffold'
+import { DraftEditor } from './components/DraftEditor'
 import { buildStepStatus, stepsOf, type StepStatus } from './lib/flow'
 
 type Tab = 'flow' | 'pipeline' | 'materials' | 'topics' | 'draft' | 'assets' | 'publish' | 'analytics'
@@ -52,20 +53,20 @@ export default function App() {
 
   // ── 流程图状态：图文与视频两条链路分开计算 ──
   // 状态来自后端真实数据；无数据支撑的环节一律 pending，不谎报进度
-  // draft / published 属后续阶段，暂固定为 0
+  const [draftStat, setDraftStat] = useState(0)
   const flowStats = {
     materials: status?.materials ?? 0,
     topics: status?.topics ?? 0,
-    drafts: 0,
+    drafts: draftStat,
     published: 0,
   }
   const imageStatus = useMemo(
     () => buildStepStatus('image', flowStats),
-    [flowStats.materials, flowStats.topics],
+    [flowStats.materials, flowStats.topics, flowStats.drafts],
   )
   const videoStatus = useMemo(
     () => buildStepStatus('video', flowStats),
-    [flowStats.materials, flowStats.topics],
+    [flowStats.materials, flowStats.topics, flowStats.drafts],
   )
 
   // ── Agent 侧栏状态 ──
@@ -81,14 +82,18 @@ export default function App() {
 
   const refresh = useCallback(async () => {
     try {
-      const [s, t, m] = await Promise.all([
+      const [s, t, m, d] = await Promise.all([
         api.status(),
         api.topics(),
         api.materials(),
+        fetch('/api/drafts/stats/summary')
+          .then((r) => r.json())
+          .catch(() => ({ total: 0 })),
       ])
       setStatus(s)
       setTopics(t.items)
       setMaterials(m.items)
+      setDraftStat(d.total ?? 0)
     } catch (e) {
       setToast({ kind: 'err', msg: `加载失败：${(e as Error).message}` })
     }
@@ -253,7 +258,7 @@ export default function App() {
         <div className="mx-auto max-w-5xl px-8 py-6">
           {/* 状态概览 */}
           {status && (
-            <div className="mb-6 grid grid-cols-4 gap-3">
+            <div className="mb-6 grid grid-cols-5 gap-3">
               <StatCard label="素材" value={status.materials} />
               <StatCard label="选题" value={status.topics} tone="accent" />
               <StatCard
@@ -262,6 +267,7 @@ export default function App() {
                 hint={status.unconverted_materials > 0 ? '需跑转换' : '已清空'}
               />
               <StatCard label="可执行选题" value={status.available_topics} />
+              <StatCard label="稿件" value={draftStat} tone={draftStat > 0 ? 'accent' : 'default'} />
             </div>
           )}
 
@@ -319,20 +325,17 @@ export default function App() {
 
           {/* ── 稿件页 ── */}
           {tab === 'draft' && (
-            <PageScaffold
-              stage="P3"
-              title="稿件"
-              desc="文案正文编辑：初稿 → 去 AI 味 → 合规校验 → 人工定稿"
-              plan={[
-                '标题生成（≤20 字，前 8-13 字须含目标长尾词）',
-                '正文编辑（300-800 字，前 80 字埋词，核心词自然出现 2-3 次）',
-                '标签配置（3-5 个，覆盖品类/场景/人群）',
-                '一键去 AI 味：口语化改写 + 加入具体人味细节',
-                '合规校验：极限词、站外导流、同质化阈值（>70% 判低质）',
-                'AI 声明标记（平台强制，不标识即违规）',
-                'Agent 协作：注册 create_draft 工具，让内核直接产出正文',
-              ]}
-            />
+            <>
+              <SectionTitle
+                title="稿件"
+                desc="文案编辑：初稿 → 去 AI 味 → 合规校验 → 人工定稿"
+              />
+              <DraftEditor
+                topics={topics}
+                onNotify={notify}
+                onChanged={refresh}
+              />
+            </>
           )}
 
           {/* ── 素材工坊 ── */}
