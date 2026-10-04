@@ -48,6 +48,10 @@ export function AgentChat({
     // 会话约定：note-{topicId}（docs/01）
     const sessionId = 'note-demo'
 
+    // 收集本轮的真实错误原因。没拿到就只能在气泡里给一句空话，
+    // 那等于让用户猜（踩过：401 被显示成「内核未返回文本」）。
+    let errDetail = ''
+
     try {
       await streamChat(text, sessionId, (event, data) => {
         if (event === 'text-delta') {
@@ -66,19 +70,21 @@ export function AgentChat({
             return next
           })
         } else if (event === 'error') {
-          onNotify('err', (data as { message?: string })?.message ?? '内核返回错误')
+          const d = data as { message?: string; detail?: string; hint?: string }
+          errDetail = [d?.message, d?.detail, d?.hint].filter(Boolean).join('\n')
+          onNotify('err', d?.message ?? '内核返回错误')
         }
       })
 
       if (!bufRef.current) {
+        const fallback = errDetail
+          ? `⚠️ ${errDetail}`
+          : '（内核未返回文本。若上方无错误提示，多为模型仍在思考或工具调用被卡住，可稍后重试或换个说法。）'
         setMsgs((m) => {
           const next = [...m]
           for (let i = next.length - 1; i >= 0; i--) {
             if (next[i].role === 'assistant') {
-              next[i] = {
-                ...next[i],
-                text: next[i].text || '（内核未返回文本，可能是工具调用或模型无响应）',
-              }
+              next[i] = { ...next[i], text: next[i].text || fallback }
               break
             }
           }
@@ -87,7 +93,16 @@ export function AgentChat({
       }
     } catch (e) {
       onNotify('err', `对话失败：${(e as Error).message}`)
-      setMsgs((m) => m.slice(0, -1))
+      setMsgs((m) => {
+        const next = [...m]
+        for (let i = next.length - 1; i >= 0; i--) {
+          if (next[i].role === 'assistant') {
+            next[i] = { ...next[i], text: `⚠️ 对话失败：${(e as Error).message}` }
+            return next.slice(0, i + 1)
+          }
+        }
+        return next
+      })
     } finally {
       setBusy(false)
     }
