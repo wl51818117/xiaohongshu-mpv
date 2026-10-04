@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useState } from 'react'
+import { useCallback, useEffect, useMemo, useState } from 'react'
 import {
   api,
   type ConvertResult,
@@ -19,23 +19,44 @@ import {
 } from './components/ui'
 import { AgentChat } from './components/AgentChat'
 import { BREAKPOINT_NARROW, useMediaQuery } from './hooks/useMediaQuery'
+import { FlowCanvas } from './components/FlowCanvas'
+import { buildStepStatus, stepsOf, type StepStatus } from './lib/flow'
 
-type Tab = 'topics' | 'materials' | 'pipeline'
+type Tab = 'flow' | 'topics' | 'materials' | 'pipeline' | 'draft'
 
 const TABS: { key: Tab; label: string; hint: string }[] = [
+  { key: 'flow', label: '流程图', hint: '图文 / 视频' },
   { key: 'topics', label: '选题库', hint: '可执行选题' },
   { key: 'materials', label: '素材库', hint: '原始资讯' },
+  { key: 'draft', label: '稿件', hint: '文案与素材' },
   { key: 'pipeline', label: '流水线', hint: '采集与转换' },
 ]
 
 export default function App() {
-  const [tab, setTab] = useState<Tab>('topics')
+  const [tab, setTab] = useState<Tab>('flow')
   const [status, setStatus] = useState<PipelineStatus | null>(null)
   const [kernel, setKernel] = useState<KernelStatus | null>(null)
   const [topics, setTopics] = useState<Topic[]>([])
   const [materials, setMaterials] = useState<Material[]>([])
   const [busy, setBusy] = useState<string | null>(null)
   const [toast, setToast] = useState<{ kind: 'ok' | 'err'; msg: string } | null>(null)
+
+  // ── 流程图状态：图文与视频两条链路分开计算 ──
+  // 状态来自后端真实数据；无数据支撑的环节一律 pending，不谎报进度
+  const draftCount = 0 // 稿件功能属下一阶段，暂固定
+  const flowStats = {
+    materials: status?.materials ?? 0,
+    topics: status?.topics ?? 0,
+    drafts: draftCount,
+  }
+  const imageStatus = useMemo(
+    () => buildStepStatus('image', flowStats),
+    [flowStats.materials, flowStats.topics],
+  )
+  const videoStatus = useMemo(
+    () => buildStepStatus('video', flowStats),
+    [flowStats.materials, flowStats.topics],
+  )
 
   // ── Agent 侧栏状态 ──
   // 桌面端：展开时占固定宽度（380px），与主内容区并列
@@ -71,6 +92,16 @@ export default function App() {
   const notify = (kind: 'ok' | 'err', msg: string) => {
     setToast({ kind, msg })
     setTimeout(() => setToast(null), 4000)
+  }
+
+  /** 点击流程节点 → 跳到对应工作页 */
+  const enterStep = (route: string) => {
+    const valid: Tab[] = ['topics', 'materials', 'pipeline', 'draft']
+    if (valid.includes(route as Tab)) {
+      setTab(route as Tab)
+    } else {
+      notify('err', `该环节尚未开放：${route}`)
+    }
   }
 
   const runCollect = async (limit: number) => {
@@ -214,6 +245,72 @@ export default function App() {
               />
               <StatCard label="可执行选题" value={status.available_topics} />
             </div>
+          )}
+
+          {/* ── 流程图主页：图文与视频两条链路分开 ── */}
+          {tab === 'flow' && (
+            <>
+              <SectionTitle
+                title="内容生产流程"
+                desc="点击任一环节直接进入对应工作页。状态由真实数据计算，虚线表示尚未完成。"
+              />
+
+              {/* 图文链路 */}
+              <div className="card mb-5 p-5">
+                <div className="mb-1 flex items-center gap-2">
+                  <span className="rounded-md bg-sky-100 px-2 py-0.5 text-xs font-medium text-sky-700">
+                    图文链路
+                  </span>
+                  <span className="text-xs text-stone-400">
+                    {stepsOf('image').length} 个环节 · 生命周期约 15-20 天
+                  </span>
+                </div>
+                <FlowCanvas
+                  kind="image"
+                  statuses={imageStatus}
+                  onEnter={(route) => enterStep(route)}
+                />
+                <StepLegend statuses={imageStatus} kind="image" />
+              </div>
+
+              {/* 视频链路 */}
+              <div className="card p-5">
+                <div className="mb-1 flex items-center gap-2">
+                  <span className="rounded-md bg-violet-100 px-2 py-0.5 text-xs font-medium text-violet-700">
+                    视频链路
+                  </span>
+                  <span className="text-xs text-stone-400">
+                    {stepsOf('video').length} 个环节 · 长尾可达 90 天
+                  </span>
+                </div>
+                <FlowCanvas
+                  kind="video"
+                  statuses={videoStatus}
+                  onEnter={(route) => enterStep(route)}
+                />
+                <StepLegend statuses={videoStatus} kind="video" />
+              </div>
+
+              <div className="mt-4 rounded-lg border border-amber-200 bg-amber-50 px-4 py-3 text-xs leading-relaxed text-amber-800">
+                <strong>两条链路的分工</strong>：图文抢搜索流量（生命周期短但搜索承接好），
+                视频冲推荐流量（初始曝光高约 30%、长尾 90 天）。
+                最优策略是双轨并行，<strong>图文爆款可二次改编成视频二次分发</strong>。
+              </div>
+            </>
+          )}
+
+          {/* ── 稿件页（下一阶段） ── */}
+          {tab === 'draft' && (
+            <>
+              <SectionTitle
+                title="稿件"
+                desc="文案正文与图片/视频素材"
+              />
+              <EmptyState
+                title="稿件功能正在开发中"
+                hint="流程图中的「文案创作」「封面生成」等环节点击后会进入这里"
+              />
+            </>
           )}
 
           {tab === 'topics' && (
@@ -510,6 +607,45 @@ export default function App() {
           </div>
         </div>
       )}
+    </div>
+  )
+}
+
+/** 流程图图例：展示各状态的含义与当前进度 */
+function StepLegend({
+  statuses,
+  kind,
+}: {
+  statuses: Record<string, StepStatus>
+  kind: 'image' | 'video'
+}) {
+  const list = stepsOf(kind)
+  const done = list.filter((s) => statuses[s.id] === 'done').length
+  const active = list.find((s) => statuses[s.id] === 'active')
+  const pct = Math.round((done / list.length) * 100)
+
+  return (
+    <div className="mt-4 flex flex-wrap items-center gap-x-5 gap-y-2 border-t border-stone-200 pt-3">
+      <span className="flex items-center gap-1.5 text-xs text-stone-500">
+        <span className="h-2.5 w-2.5 rounded-sm border-[1.5px] border-emerald-500 bg-emerald-50" />
+        已完成
+      </span>
+      <span className="flex items-center gap-1.5 text-xs text-stone-500">
+        <span className="h-2.5 w-2.5 rounded-sm border-[1.5px] border-orange-600 bg-orange-50" />
+        待进行
+      </span>
+      <span className="flex items-center gap-1.5 text-xs text-stone-500">
+        <span className="h-2.5 w-2.5 rounded-sm border-[1.5px] border-stone-300 bg-white" />
+        未开始
+      </span>
+
+      <span className="ml-auto text-xs text-stone-500">
+        进度 <span className="font-medium tabular-nums text-stone-700">{done}/{list.length}</span>
+        <span className="ml-1 text-stone-400">({pct}%)</span>
+        {active && (
+          <span className="ml-2 text-orange-700">下一步：{active.title}</span>
+        )}
+      </span>
     </div>
   )
 }
