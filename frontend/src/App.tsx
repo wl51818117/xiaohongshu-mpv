@@ -23,6 +23,7 @@ import { FlowCanvas } from './components/FlowCanvas'
 import { PageScaffold } from './components/PageScaffold'
 import { DraftEditor } from './components/DraftEditor'
 import { buildStepStatus, stepsOf, type StepStatus } from './lib/flow'
+import { connectWorkbench, type ViewState, type WorkbenchOps } from './bridge/workbench-ops'
 
 type Tab = 'flow' | 'pipeline' | 'materials' | 'topics' | 'draft' | 'assets' | 'publish' | 'analytics'
 
@@ -75,10 +76,80 @@ export default function App() {
   const isNarrow = useMediaQuery(BREAKPOINT_NARROW)
   const [agentOpen, setAgentOpen] = useState(false)
 
+  // ── bridge 通道（hbridge v2.1）─────────────────────────
+  // 让 Agent 能操作界面（切页签/筛选/开选题），而不只是调后端 API
+  const [bridgeState, setBridgeState] = useState<
+    'idle' | 'connecting' | 'ready' | 'failed'
+  >('idle')
+  const [topicFilter, setTopicFilter] = useState<{
+    status?: string
+    keyword?: string
+  }>({})
+  const [selectedTopicId, setSelectedTopicId] = useState<number | null>(null)
+
   // 窄屏时默认收起，避免一进来就被浮层挡住主内容
   useEffect(() => {
     if (isNarrow) setAgentOpen(false)
   }, [isNarrow])
+
+  /** 当前视图状态：Agent 通过 read_workbench_state 读取 */
+  const readView = useCallback((): ViewState => {
+    return {
+      tab,
+      topicFilter,
+      selectedTopicId,
+      stats: {
+        materials: status?.materials ?? 0,
+        topics: status?.topics ?? 0,
+        drafts: draftStat,
+      },
+    }
+  }, [tab, topicFilter, selectedTopicId, status, draftStat])
+
+  /** 选题库筛选结果（bridge 的 filter_topics 会改topicFilter）*/
+  const visibleTopics = useMemo(() => {
+    const kw = topicFilter.keyword?.trim().toLowerCase()
+    return topics.filter((t) => {
+      if (topicFilter.status && t.status !== topicFilter.status) return false
+      if (kw && !t.title.toLowerCase().includes(kw)) return false
+      return true
+    })
+  }, [topics, topicFilter])
+
+  /** 接通 bridge：注册工作台能力，让模型可调用 */
+  useEffect(() => {
+    let disposed = false
+
+    const ops: WorkbenchOps = {
+      gotoTab: (t) => {
+        if (!disposed) setTab(t as Tab)
+      },
+      setTopicFilter: (f) => {
+        if (!disposed) setTopicFilter(f)
+      },
+      selectTopic: (id) => {
+        if (!disposed) setSelectedTopicId(id)
+      },
+      openAgent: () => {
+        if (!disposed) setAgentOpen(true)
+      },
+      readView,
+    }
+
+    setBridgeState('connecting')
+    connectWorkbench(ops)
+      .then(() => {
+        if (!disposed) setBridgeState('ready')
+      })
+      .catch(() => {
+        // bridge 不可用不影响主流程：Agent 对话仍走原有 /api/agent/chat
+        if (!disposed) setBridgeState('failed')
+      })
+
+    return () => {
+      disposed = true
+    }
+  }, [readView])
 
   const refresh = useCallback(async () => {
     try {
@@ -221,6 +292,26 @@ export default function App() {
               {kernel.tools.length} 个工具可用
             </div>
           ) : null}
+          <div className="mt-1.5 flex items-center gap-1.5 text-xs">
+            <span
+              className={`h-1.5 w-1.5 rounded-full ${
+                bridgeState === 'ready'
+                  ? 'bg-violet-500'
+                  : bridgeState === 'failed'
+                    ? 'bg-stone-300'
+                    : 'bg-amber-400'
+              }`}
+            />
+            <span className="text-stone-400">
+              {bridgeState === 'ready'
+                ? '界面可被 Agent 操作'
+                : bridgeState === 'connecting'
+                  ? '桥接中…'
+                  : bridgeState === 'failed'
+                    ? '桥接未启用'
+                    : '桥接待命'}
+            </span>
+          </div>
         </div>
       </aside>
 
@@ -332,6 +423,7 @@ export default function App() {
               />
               <DraftEditor
                 topics={topics}
+                selectedTopicId={selectedTopicId}
                 onNotify={notify}
                 onChanged={refresh}
               />
@@ -396,18 +488,64 @@ export default function App() {
               <SectionTitle
                 title="选题库"
                 desc="由素材经合规过筛后转换而来，可直接进入建稿"
+                action={
+                  <div className="flex items-center gap-2">
+                    <input
+                      value={topicFilter.keyword ?? ''}
+                      onChange={(e) =>
+                        setTopicFilter((f) => ({ ...f, keyword: e.target.value }))
+                      }
+                      placeholder="按标题筛选"
+                      className="w-32 rounded-lg border border-stone-300 px-2.5 py-1.5 text-xs outline-none focus:border-stone-500"
+                    />
+                    <select
+                      value={topicFilter.status ?? ''}
+                      onChange={(e) =>
+                        setTopicFilter((f) => ({
+                          ...f,
+                          status: e.target.value || undefined,
+                        }))
+                      }
+                      className="rounded-lg border border-stone-300 px-2 py-1.5 text-xs outline-none focus:border-stone-500"
+                    >
+                      <option value="">全部状态</option>
+                      <option value="pooled">可执行</option>
+                      <option value="claimed">建稿中</option>
+                      <option value="done">已成稿</option>
+                      <option value="archived">已归档</option>
+                    </select>
+                    {(topicFilter.status || topicFilter.keyword) && (
+                      <button
+                        className="btn-ghost !px-2 !py-1 !text-xs"
+                        onClick={() => setTopicFilter({})}
+                      >
+                        清除
+                      </button>
+                    )}
+                  </div>
+                }
               />
-              {topics.length === 0 ? (
+              {visibleTopics.length === 0 ? (
                 <EmptyState
-                  title="选题库还是空的"
-                  hint="去「流水线」页跑一次采集与转换"
+                  title={
+                    topics.length === 0 ? '选题库还是空的' : '没有匹配的选题'
+                  }
+                  hint={
+                    topics.length === 0
+                      ? '去「流水线」页跑一次采集与转换'
+                      : '试试清除筛选条件'
+                  }
                 />
               ) : (
                 <div className="space-y-2.5">
-                  {topics.map((t) => (
+                  {visibleTopics.map((t) => (
                     <div
                       key={t.id}
-                      className="card animate-in px-4 py-3.5 transition-colors hover:border-stone-300"
+                      className={`card animate-in px-4 py-3.5 transition-colors ${
+                        selectedTopicId === t.id
+                          ? 'border-orange-400 ring-1 ring-orange-200'
+                          : 'hover:border-stone-300'
+                      }`}
                     >
                       <div className="flex items-start justify-between gap-3">
                         <div className="min-w-0 flex-1">
@@ -436,9 +574,15 @@ export default function App() {
                             {t.source_name && <span>来源：{t.source_name}</span>}
                           </div>
                         </div>
-                        <span className="shrink-0 text-xs tabular-nums text-stone-300">
-                          #{t.id}
-                        </span>
+                        <button
+                          className="btn-ghost shrink-0 !px-2 !py-1 !text-xs"
+                          onClick={() => {
+                            setSelectedTopicId(t.id)
+                            setTab('draft')
+                          }}
+                        >
+                          写稿
+                        </button>
                       </div>
                     </div>
                   ))}

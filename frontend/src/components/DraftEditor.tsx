@@ -14,10 +14,12 @@ import {
  */
 export function DraftEditor({
   topics,
+  selectedTopicId,
   onNotify,
   onChanged,
 }: {
   topics: Topic[]
+  selectedTopicId?: number | null
   onNotify: (kind: 'ok' | 'err', msg: string) => void
   onChanged: () => void
 }) {
@@ -63,6 +65,23 @@ export function DraftEditor({
     void loadDrafts()
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [])
+
+  // 外部（如 Agent 的 open_topic 能力）指定了选题 → 切到它并预填标题
+  useEffect(() => {
+    if (!selectedTopicId) return
+    setTopicId(selectedTopicId)
+    const t = topics.find((x) => x.id === selectedTopicId)
+    // 若该选题还没有稿件，新建一篇并预填标题
+    if (t && !drafts.some((d) => d.topic_id === selectedTopicId)) {
+      setCurrent(null)
+      setTitle(t.title.slice(0, 20))
+      setBody('')
+      setTagsText('')
+      setDeclaration('本内容含 AI 辅助生成部分')
+      setValidation(null)
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [selectedTopicId])
 
   const openDraft = async (id: number) => {
     try {
