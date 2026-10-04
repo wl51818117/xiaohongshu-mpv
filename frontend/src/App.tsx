@@ -20,16 +20,25 @@ import {
 import { AgentChat } from './components/AgentChat'
 import { BREAKPOINT_NARROW, useMediaQuery } from './hooks/useMediaQuery'
 import { FlowCanvas } from './components/FlowCanvas'
+import { PageScaffold } from './components/PageScaffold'
 import { buildStepStatus, stepsOf, type StepStatus } from './lib/flow'
 
-type Tab = 'flow' | 'topics' | 'materials' | 'pipeline' | 'draft'
+type Tab = 'flow' | 'pipeline' | 'materials' | 'topics' | 'draft' | 'assets' | 'publish' | 'analytics'
 
+/**
+ * 导航顺序 = 内容生产顺序：
+ * 流程图（总览）→ 流水线（采集）→ 素材库（原料）→ 选题库（选题）
+ * → 稿件（文案）→ 素材工坊（图/视频）→ 发布队列→ 数据看板（复盘）
+ */
 const TABS: { key: Tab; label: string; hint: string }[] = [
   { key: 'flow', label: '流程图', hint: '图文 / 视频' },
-  { key: 'topics', label: '选题库', hint: '可执行选题' },
-  { key: 'materials', label: '素材库', hint: '原始资讯' },
-  { key: 'draft', label: '稿件', hint: '文案与素材' },
   { key: 'pipeline', label: '流水线', hint: '采集与转换' },
+  { key: 'materials', label: '素材库', hint: '原始资讯' },
+  { key: 'topics', label: '选题库', hint: '可执行选题' },
+  { key: 'draft', label: '稿件', hint: '文案编辑' },
+  { key: 'assets', label: '素材工坊', hint: '图片 / 视频' },
+  { key: 'publish', label: '发布队列', hint: '半自动发布' },
+  { key: 'analytics', label: '数据看板', hint: '复盘与爆文复用' },
 ]
 
 export default function App() {
@@ -43,11 +52,12 @@ export default function App() {
 
   // ── 流程图状态：图文与视频两条链路分开计算 ──
   // 状态来自后端真实数据；无数据支撑的环节一律 pending，不谎报进度
-  const draftCount = 0 // 稿件功能属下一阶段，暂固定
+  // draft / published 属后续阶段，暂固定为 0
   const flowStats = {
     materials: status?.materials ?? 0,
     topics: status?.topics ?? 0,
-    drafts: draftCount,
+    drafts: 0,
+    published: 0,
   }
   const imageStatus = useMemo(
     () => buildStepStatus('image', flowStats),
@@ -96,7 +106,15 @@ export default function App() {
 
   /** 点击流程节点 → 跳到对应工作页 */
   const enterStep = (route: string) => {
-    const valid: Tab[] = ['topics', 'materials', 'pipeline', 'draft']
+    const valid: Tab[] = [
+      'pipeline',
+      'materials',
+      'topics',
+      'draft',
+      'assets',
+      'publish',
+      'analytics',
+    ]
     if (valid.includes(route as Tab)) {
       setTab(route as Tab)
     } else {
@@ -299,18 +317,75 @@ export default function App() {
             </>
           )}
 
-          {/* ── 稿件页（下一阶段） ── */}
+          {/* ── 稿件页 ── */}
           {tab === 'draft' && (
-            <>
-              <SectionTitle
-                title="稿件"
-                desc="文案正文与图片/视频素材"
-              />
-              <EmptyState
-                title="稿件功能正在开发中"
-                hint="流程图中的「文案创作」「封面生成」等环节点击后会进入这里"
-              />
-            </>
+            <PageScaffold
+              stage="P3"
+              title="稿件"
+              desc="文案正文编辑：初稿 → 去 AI 味 → 合规校验 → 人工定稿"
+              plan={[
+                '标题生成（≤20 字，前 8-13 字须含目标长尾词）',
+                '正文编辑（300-800 字，前 80 字埋词，核心词自然出现 2-3 次）',
+                '标签配置（3-5 个，覆盖品类/场景/人群）',
+                '一键去 AI 味：口语化改写 + 加入具体人味细节',
+                '合规校验：极限词、站外导流、同质化阈值（>70% 判低质）',
+                'AI 声明标记（平台强制，不标识即违规）',
+                'Agent 协作：注册 create_draft 工具，让内核直接产出正文',
+              ]}
+            />
+          )}
+
+          {/* ── 素材工坊 ── */}
+          {tab === 'assets' && (
+            <PageScaffold
+              stage="P4"
+              title="素材工坊"
+              desc="图片与视频素材生产：封面、内页、分镜图、视频"
+              plan={[
+                'AI 生图：封面 3:4（1080×1440）出 3 个候选供挑选',
+                'AI 生图：内页 4-8 张，九宫格顺序（全景→细节→场景→价格）',
+                'HTML 卡片渲染：干货合集图、数据图表（版式精确可控）',
+                '角色一致性：参考图方案（同一模特/形象跨图复用）',
+                'AI 图生视频：分镜首帧 → 逐镜生成（必用图生视频）',
+                'ffmpeg 合成：拼接 + 字幕烧录（避让底部 15%）+ BGM',
+                '规格校验：分辨率/码率/时长/前 3秒钩子/无水印',
+                '素材生命周期提醒（AI 素材仅约 15 天，需换新）',
+              ]}
+            />
+          )}
+
+          {/* ── 发布队列 ── */}
+          {tab === 'publish' && (
+            <PageScaffold
+              stage="P5"
+              title="发布队列"
+              desc="半自动发布：风控探测 → 自动预填 → 人工点发布"
+              plan={[
+                'botDetect 前置探测：动页面前先看有无登录/验证码/风控',
+                'Playwright 自动预填：正文、标签、图片上传',
+                '人工确认闸门：绝不 AI 全自动提交（平台封禁 AI 托管账号）',
+                '发布后 10 分钟收录自查：用小号搜笔记全称',
+                'AI 声明勾选：发布页【内容类型声明】必填项',
+                '发布记录与审计：谁在何时发了什么',
+              ]}
+            />
+          )}
+
+          {/* ── 数据看板 ── */}
+          {tab === 'analytics' && (
+            <PageScaffold
+              stage="P7"
+              title="数据看板"
+              desc="发布后复盘：1/3/7/14 天快照，爆文要素回流选题"
+              plan={[
+                '指标看板：曝光、点击率、互动率、完播率、收藏率、涨粉',
+                '投流建议：薯条（点击率≥5% 且完读≥40%）、聚光（48h 赞藏≥100）',
+                '爆文要素拆解：标题公式、结构模板、封面类型',
+                '评论区高频提问 → 直接转为下一批选题',
+                '月度体检：内容配比 7:2:1、素材 15 天生命周期、标签重合度',
+                '同号防重复：相似度超 60% 会被判抄袭',
+              ]}
+            />
           )}
 
           {tab === 'topics' && (

@@ -14,7 +14,14 @@ export type StepDef = {
   title: string
   desc: string
   /** 点击进入的工作台页签 */
-  route: 'topics' | 'materials' | 'pipeline' | 'draft'
+  route:
+    | 'pipeline'
+    | 'materials'
+    | 'topics'
+    | 'draft'
+    | 'assets'
+    | 'publish'
+    | 'analytics'
   /** 图文链路是否包含该步 */
   image: boolean
   /** 视频链路是否包含该步 */
@@ -50,7 +57,7 @@ export const STEPS: StepDef[] = [
     id: 'cover',
     title: '封面生成',
     desc: '3:4 竖版封面，出 3 个候选供挑选',
-    route: 'draft',
+    route: 'assets',
     image: true,
     video: true,
   },
@@ -58,7 +65,7 @@ export const STEPS: StepDef[] = [
     id: 'inner',
     title: '内页排版',
     desc: '4-8 张内页，九宫格顺序：全景→细节→场景',
-    route: 'draft',
+    route: 'assets',
     image: true,
     video: false,
   },
@@ -66,7 +73,7 @@ export const STEPS: StepDef[] = [
     id: 'script',
     title: '分镜脚本',
     desc: '0-3 秒钩子 / 3-6 秒可信 / 主体 / 结尾转化',
-    route: 'draft',
+    route: 'assets',
     image: false,
     video: true,
   },
@@ -74,15 +81,15 @@ export const STEPS: StepDef[] = [
     id: 'genvideo',
     title: '图生视频',
     desc: '首帧图 → 分镜视频（必用图生视频，文生视频不可控）',
-    route: 'draft',
+    route: 'assets',
     image: false,
     video: true,
   },
   {
     id: 'compose',
     title: '合成校验',
-    desc: 'ffmpeg 拼接 + 字幕烧录 + 规格与合规双校验',
-    route: 'draft',
+    desc: '拼接 + 字幕烧录 + 规格与合规双校验',
+    route: 'assets',
     image: true,
     video: true,
   },
@@ -90,7 +97,15 @@ export const STEPS: StepDef[] = [
     id: 'publish',
     title: '半自动发布',
     desc: '风控探测 → 自动预填 → 人工点发布',
-    route: 'draft',
+    route: 'publish',
+    image: true,
+    video: true,
+  },
+  {
+    id: 'review',
+    title: '数据复盘',
+    desc: '1/3/7/14 天快照，爆文要素回流选题',
+    route: 'analytics',
     image: true,
     video: true,
   },
@@ -109,7 +124,7 @@ export function stepsOf(kind: 'image' | 'video'): StepDef[] {
  */
 export function buildStepStatus(
   kind: 'image' | 'video',
-  stats: { materials: number; topics: number; drafts: number },
+  stats: { materials: number; topics: number; drafts: number; published: number },
 ): Record<string, StepStatus> {
   const list = stepsOf(kind)
   const out: Record<string, StepStatus> = {}
@@ -120,7 +135,7 @@ export function buildStepStatus(
   // 转换：有选题即完成
   if (stats.topics > 0) out['convert'] = 'done'
 
-  // 文案：有稿件即完成，否则是当前该做的第一步
+  // 内容生产：有稿件即推进到合成校验
   if (stats.drafts > 0) {
     out['copy'] = 'done'
     out['cover'] = 'done'
@@ -137,6 +152,12 @@ export function buildStepStatus(
     out['convert'] = 'active'
   } else {
     out['collect'] = 'active'
+  }
+
+  // 发布：有已发布内容则发布完成，复盘成为当前环节
+  if (stats.published > 0) {
+    out['publish'] = 'done'
+    out['review'] = 'active'
   }
 
   return out
