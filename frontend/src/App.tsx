@@ -26,6 +26,7 @@ import { PageScaffold } from './components/PageScaffold'
 import { DraftEditor } from './components/DraftEditor'
 import { AssetStudio } from './components/AssetStudio'
 import { AnalyticsBoard } from './components/AnalyticsBoard'
+import { SettingsPanel } from './components/SettingsPanel'
 import { buildStepStatus, stepsOf, type StepStatus } from './lib/flow'
 import { connectWorkbench, type ViewState, type WorkbenchOps } from './bridge/workbench-ops'
 
@@ -92,7 +93,17 @@ export default function App() {
   const [selectedTopicId, setSelectedTopicId] = useState<number | null>(null)
   const [presets, setPresets] = useState<FeedPreset[]>([])
   const [currentDraft, setCurrentDraft] = useState<Draft | null>(null)
+  // 侧栏折叠状态（localStorage 持久化）
+  const [sidebarCollapsed, setSidebarCollapsed] = useState(
+    () => localStorage.getItem('wb-sidebar-collapsed') === '1',
+  )
+  const [settingsOpen, setSettingsOpen] = useState(false)
   const [presetKey, setPresetKey] = useState<string>('')
+
+  // 侧栏折叠状态持久化
+  useEffect(() => {
+    localStorage.setItem('wb-sidebar-collapsed', sidebarCollapsed ? '1' : '0')
+  }, [sidebarCollapsed])
 
   // 窄屏时默认收起，避免一进来就被浮层挡住主内容
   useEffect(() => {
@@ -271,32 +282,54 @@ export default function App() {
 
   return (
     <div className="relative flex h-full overflow-hidden bg-[var(--bg)]">
-      {/* ── 左侧导航：紫色渐变 + 白色药丸选中态 ── */}
+      {/* ── 左侧导航：紫色渐变宽栏（可折叠成图标栏） ── */}
       <aside
         className={`${
           isNarrow ? 'hidden' : 'flex'
-        } w-[68px] shrink-0 flex-col items-center gap-2 bg-gradient-to-b from-[var(--grad-sidebar-from)] to-[var(--grad-sidebar-to)] py-4`}
+        } ${
+          sidebarCollapsed ? 'w-[68px] items-center' : 'w-[220px] items-stretch'
+        } shrink-0 flex-col bg-gradient-to-b from-[var(--grad-sidebar-from)] to-[var(--grad-sidebar-to)] py-4 transition-[width] duration-200`}
       >
-        {/* Logo */}
-        <div className="mb-2 flex h-10 w-10 items-center justify-center rounded-xl bg-white/20 text-white backdrop-blur">
-          <svg width="20" height="20" viewBox="0 0 24 24" fill="none">
-            <path
-              d="M4 7.5A2.5 2.5 0 016.5 5h11A2.5 2.5 0 0120 7.5v9a2.5 2.5 0 01-2.5 2.5h-11A2.5 2.5 0 014 16.5v-9z"
-              stroke="currentColor"
-              strokeWidth="1.8"
-              strokeLinejoin="round"
-            />
-            <path
-              d="M8 9.5h8M8 13h5"
-              stroke="currentColor"
-              strokeWidth="1.8"
-              strokeLinecap="round"
-            />
-          </svg>
+        {/* Logo + 标题 */}
+        <div
+          className={`mb-4 flex items-center gap-2.5 px-4 ${
+            sidebarCollapsed ? 'justify-center px-0' : ''
+          }`}
+        >
+          <div className="flex h-10 w-10 shrink-0 items-center justify-center rounded-xl bg-white/20 text-white backdrop-blur">
+            <svg width="20" height="20" viewBox="0 0 24 24" fill="none">
+              <path
+                d="M4 7.5A2.5 2.5 0 016.5 5h11A2.5 2.5 0 0120 7.5v9a2.5 2.5 0 01-2.5 2.5h-11A2.5 2.5 0 014 16.5v-9z"
+                stroke="currentColor"
+                strokeWidth="1.8"
+                strokeLinejoin="round"
+              />
+              <path
+                d="M8 9.5h8M8 13h5"
+                stroke="currentColor"
+                strokeWidth="1.8"
+                strokeLinecap="round"
+              />
+            </svg>
+          </div>
+          {!sidebarCollapsed && (
+            <div className="min-w-0">
+              <div className="truncate text-sm font-semibold text-white">
+                电商工作台
+              </div>
+              <div className="truncate text-[11px] text-white/60">
+                小红书 · MVP
+              </div>
+            </div>
+          )}
         </div>
 
-        {/* 导航图标：选中态为白色药丸 */}
-        <nav className="flex flex-1 flex-col items-center gap-1.5">
+        {/* 导航：展开时带文字，折叠时只留图标 */}
+        <nav
+          className={`flex flex-1 flex-col gap-1 px-3 ${
+            sidebarCollapsed ? 'items-center px-2' : ''
+          }`}
+        >
           {TABS.map((t) => {
             const active = tab === t.key
             return (
@@ -306,42 +339,136 @@ export default function App() {
                 title={`${t.label} · ${t.hint}`}
                 aria-label={t.label}
                 aria-current={active ? 'page' : undefined}
-                className={`group flex h-11 w-11 items-center justify-center rounded-2xl transition-all duration-200 ${
+                className={`flex items-center gap-3 rounded-xl transition-all duration-200 ${
+                  sidebarCollapsed
+                    ? 'h-11 w-11 justify-center'
+                    : 'px-3 py-2.5'
+                } ${
                   active
                     ? 'bg-white text-[var(--grad-sidebar-from)] shadow-lg'
-                    : 'text-white/70 hover:bg-white/15 hover:text-white'
+                    : 'text-white/75 hover:bg-white/15 hover:text-white'
                 }`}
               >
-                <TabIcon tab={t.key} />
+                <span className="shrink-0">
+                  <TabIcon tab={t.key} />
+                </span>
+                {!sidebarCollapsed && (
+                  <span className="min-w-0 text-left">
+                    <span className="block truncate text-sm font-medium">
+                      {t.label}
+                    </span>
+                    <span
+                      className={`block truncate text-[11px] ${
+                        active ? 'text-stone-400' : 'text-white/50'
+                      }`}
+                    >
+                      {t.hint}
+                    </span>
+                  </span>
+                )}
               </button>
             )
           })}
         </nav>
 
-        {/* 状态区 */}
-        <div className="flex flex-col items-center gap-2 border-t border-white/15 pt-3">
-          <span
-            className={`h-2 w-2 rounded-full ${
-              kernel?.ok ? 'bg-emerald-400' : 'bg-white/25'
+        {/* 底部：状态 + 设置 + 折叠 */}
+        <div
+          className={`mt-3 border-t border-white/15 pt-3 ${
+            sidebarCollapsed ? 'flex flex-col items-center gap-2 px-2' : 'px-3'
+          }`}
+        >
+          {!sidebarCollapsed && (
+            <div className="mb-2 space-y-1 px-1">
+              <div className="flex items-center gap-2 text-[11px] text-white/70">
+                <span
+                  className={`h-1.5 w-1.5 shrink-0 rounded-full ${
+                    kernel?.ok ? 'bg-emerald-400' : 'bg-white/25'
+                  }`}
+                />
+                <span className="truncate">
+                  内核{kernel?.ok ? '在线' : '离线'}
+                  {kernel?.tools?.length ? ` · ${kernel.tools.length}工具` : ''}
+                </span>
+              </div>
+              <div className="flex items-center gap-2 text-[11px] text-white/70">
+                <span
+                  className={`h-1.5 w-1.5 shrink-0 rounded-full ${
+                    bridgeState === 'ready'
+                      ? 'bg-cyan-300'
+                      : bridgeState === 'failed'
+                        ? 'bg-white/25'
+                        : 'bg-amber-300'
+                  }`}
+                />
+                <span className="truncate">
+                  {bridgeState === 'ready'
+                    ? '界面可被 Agent 操作'
+                    : bridgeState === 'connecting'
+                      ? '桥接中'
+                      : '桥接未启用'}
+                </span>
+              </div>
+            </div>
+          )}
+
+          {/* 设置入口 */}
+          <button
+            onClick={() => setSettingsOpen(true)}
+            title="设置"
+            aria-label="设置"
+            className={`flex items-center gap-3 rounded-xl py-2.5 text-white/75 transition-colors hover:bg-white/15 hover:text-white ${
+              sidebarCollapsed
+                ? 'h-11 w-11 justify-center'
+                : 'w-full px-3'
             }`}
-            title={kernel?.ok ? '内核在线' : '内核离线'}
-          />
-          <span
-            className={`h-2 w-2 rounded-full ${
-              bridgeState === 'ready'
-                ? 'bg-cyan-300'
-                : bridgeState === 'failed'
-                  ? 'bg-white/25'
-                  : 'bg-amber-300'
+          >
+            <svg width="20" height="20" viewBox="0 0 24 24" fill="none">
+              <circle cx="12" cy="12" r="3" stroke="currentColor" strokeWidth="1.8" />
+              <path
+                d="M19.4 15a1.65 1.65 0 00.33 1.82l.06.06a2 2 0 11-2.83 2.83l-.06-.06a1.65 1.65 0 00-1.82-.33 1.65 1.65 0 00-1 1.51V21a2 2 0 11-4 0v-.09A1.65 1.65 0 008 19.4a1.65 1.65 0 00-1.82.33l-.06.06a2 2 0 11-2.83-2.83l.06-.06a1.65 1.65 0 00.33-1.82 1.65 1.65 0 00-1.51-1H2a2 2 0 110-4h.09A1.65 1.65 0 003.6 8a1.65 1.65 0 00-.33-1.82l-.06-.06a2 2 0 112.83-2.83l.06.06a1.65 1.65 0 001.82.33H8a1.65 1.65 0 001-1.51V2a2 2 0 114 0v.09a1.65 1.65 0 001 1.51 1.65 1.65 0 001.82-.33l.06-.06a2 2 0 112.83 2.83l-.06.06a1.65 1.65 0 00-.33 1.82V8a1.65 1.65 0 001.51 1H22a2 2 0 110 4h-.09a1.65 1.65 0 00-1.51 1z"
+                stroke="currentColor"
+                strokeWidth="1.6"
+                strokeLinecap="round"
+                strokeLinejoin="round"
+              />
+            </svg>
+            {!sidebarCollapsed && (
+              <span className="text-sm font-medium">设置</span>
+            )}
+          </button>
+
+          {/* 折叠切换 */}
+          <button
+            onClick={() => setSidebarCollapsed((c) => !c)}
+            title={sidebarCollapsed ? '展开侧栏' : '收起侧栏'}
+            aria-label={sidebarCollapsed ? '展开侧栏' : '收起侧栏'}
+            className={`flex items-center gap-3 rounded-xl py-2.5 text-white/75 transition-colors hover:bg-white/15 hover:text-white ${
+              sidebarCollapsed
+                ? 'h-11 w-11 justify-center'
+                : 'w-full px-3'
             }`}
-            title={
-              bridgeState === 'ready'
-                ? '界面可被 Agent 操作'
-                : bridgeState === 'connecting'
-                  ? '桥接中'
-                  : '桥接未启用'
-            }
-          />
+          >
+            <svg
+              width="20"
+              height="20"
+              viewBox="0 0 24 24"
+              fill="none"
+              className={`shrink-0 transition-transform duration-200 ${
+                sidebarCollapsed ? 'rotate-180' : ''
+              }`}
+            >
+              <path
+                d="M15 18l-6-6 6-6"
+                stroke="currentColor"
+                strokeWidth="1.8"
+                strokeLinecap="round"
+                strokeLinejoin="round"
+              />
+            </svg>
+            {!sidebarCollapsed && (
+              <span className="text-sm font-medium">收起</span>
+            )}
+          </button>
         </div>
       </aside>
 
@@ -871,6 +998,14 @@ export default function App() {
           />
         </button>
       )}
+
+      {/* ── 设置面板 ── */}
+      <SettingsPanel
+        open={settingsOpen}
+        onClose={() => setSettingsOpen(false)}
+        onNotify={notify}
+        onSaved={refresh}
+      />
 
       {/* ── 提示条 ──
           定位在主内容区中心：Agent 展开时不会互相遮挡
