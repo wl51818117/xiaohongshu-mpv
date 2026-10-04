@@ -1,8 +1,9 @@
 import { useCallback, useEffect, useState } from 'react'
 import { type Draft, type Validation } from '../lib/api'
 import { Button, EmptyState, SectionTitle, Tag } from './ui'
+import { PromptPreview } from './PromptPreview'
 
-type Style = 'realistic' | 'clean' | 'vivid'
+type Style = string
 
 /** 生图服务配置状态（不含密钥明文） */
 type ImageProvider = {
@@ -12,10 +13,20 @@ type ImageProvider = {
   hint: string
 }
 
-const STYLES: { key: Style; label: string }[] = [
+const STYLES: { key: string; label: string }[] = [
   { key: 'realistic', label: '写实摄影' },
   { key: 'clean', label: '干净极简' },
   { key: 'vivid', label: '色彩鲜明' },
+  { key: 'film', label: '胶片种草' },
+  { key: 'studio', label: '电商白底' },
+  { key: 'lifestyle', label: '生活场景' },
+]
+
+const SCENES: { key: string; label: string }[] = [
+  { key: 'static', label: '静止（主体微动）' },
+  { key: 'push', label: '推近' },
+  { key: 'rotate', label: '环绕' },
+  { key: 'detail', label: '细节微距' },
 ]
 
 /** 素材工坊：封面 / 内页 / 视频生产。
@@ -33,6 +44,7 @@ export function AssetStudio({
   onNotify: (kind: 'ok' | 'err', msg: string) => void
 }) {
   const [style, setStyle] = useState<Style>('realistic')
+  const [scene, setScene] = useState('static')
   const [innerCount, setInnerCount] = useState(6)
   const [busy, setBusy] = useState<string | null>(null)
   const [coverCheck, setCoverCheck] = useState<Validation | null>(null)
@@ -102,7 +114,7 @@ export function AssetStudio({
       const vr = await fetch('/api/assets/video', {
         method: 'POST',
         headers: { 'content-type': 'application/json' },
-        body: JSON.stringify({ draft_id: draft.id, first_frame: first, scene: 'push' }),
+        body: JSON.stringify({ draft_id: draft.id, first_frame: first, scene }),
       })
       const vd = await vr.json()
       setLastPrompt(vd.prompt || '')
@@ -112,7 +124,7 @@ export function AssetStudio({
     } finally {
       setBusy(null)
     }
-  }, [draft, cover, images, onNotify])
+  }, [draft, cover, images, scene, onNotify])
 
   if (!draft) {
     return (
@@ -145,6 +157,16 @@ export function AssetStudio({
           <span className="ml-1 opacity-80">（{provider.key_masked}）</span>
         </div>
       )}
+
+      {/* 提示词预览：生图前就能看到将要发出去的内容，且可逐块修改 */}
+      <PromptPreview
+        draftId={draft.id}
+        kind="cover"
+        style={style}
+        count={innerCount}
+        scene={scene}
+        onNotify={onNotify}
+      />
 
       {/* 操作区 */}
       <div className="card mb-5 p-5">
@@ -211,7 +233,18 @@ export function AssetStudio({
 
           {/* 视频 */}
           <div>
-            <div className="field-label">视频链路</div>
+            <div className="field-label">视频运镜</div>
+            <select
+              value={scene}
+              onChange={(e) => setScene(e.target.value)}
+              className="field mb-2"
+            >
+              {SCENES.map((s) => (
+                <option key={s.key} value={s.key}>
+                  {s.label}
+                </option>
+              ))}
+            </select>
             <Button
               variant="default"
               size="md"

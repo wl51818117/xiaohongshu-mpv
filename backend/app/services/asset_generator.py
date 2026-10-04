@@ -23,13 +23,14 @@ from datetime import datetime
 from pathlib import Path
 
 from app.core.config import settings
+from app.services import prompt_engine as pe
 
-# ── 规格常量（docs/02-内容规格与合规基线）──
-COVER_W, COVER_H = 1080, 1440          # 3:4 竖版
-IMAGE_MIN, IMAGE_MAX = 4, 8# 内页数量
-COVER_CANDIDATES = 3                    # 封面出 3 个候选
-VIDEO_MAX_SEC = 60                      # 视频时长上限（秒）
-AI_ASSET_TTL_DAYS = 15                  # AI 素材生命周期
+# 尺寸常量以引擎为准（单一真源）
+COVER_W, COVER_H = pe.COVER_W, pe.COVER_H
+IMAGE_MIN, IMAGE_MAX = 4, 8               # 内页数量
+COVER_CANDIDATES = 3                       # 封面出 3 个候选
+VIDEO_MAX_SEC = 60                         # 视频时长上限（秒）
+AI_ASSET_TTL_DAYS = 15# AI 素材生命周期
 
 # 素材根目录（不入库）
 ASSET_ROOT = settings.data_dir.parent / "assets"
@@ -118,92 +119,46 @@ class DraftContext:
         return [s for _, s in scored[:4]]
 
 
+# ★ 提示词统一走 prompt_engine（Prompt as Code，结构化可复用）。
+#   这里只做「把稿件上下文喂给引擎」，不再各自拼字符串——
+#   改约束时只改引擎一处，所有场景同步生效。
+
+def build_cover_spec(ctx: DraftContext, style: str = "realistic") -> "pe.PromptSpec":
+    """封面结构化提示词（可.to_dict() 存复用）。"""
+    return pe.cover_spec(
+        title=ctx.title,
+        key_points=ctx.key_points,
+        style=style,
+        core_terms=ctx.core_terms,
+    )
+
+
+def build_inner_spec(ctx: DraftContext, index: int, total: int, style: str = "realistic") -> "pe.PromptSpec":
+    """内页结构化提示词。"""
+    return pe.inner_spec(
+        title=ctx.title, index=index, total=total,
+        key_points=ctx.key_points, style=style,
+    )
+
+
+def build_video_spec(ctx: DraftContext, scene: str = "static") -> "pe.PromptSpec":
+    """图生视频运镜提示词。"""
+    return pe.video_spec(ctx.title, scene, ctx.core_terms)
+
+
+# 兼容旧调用：仍返回渲染后的文本
 def build_cover_prompt(ctx: DraftContext, style: str = "realistic") -> str:
-    """封面提示词 —— **吃稿件全上下文**。
-
-    3:4 竖版是硬要求，直接写进提示词而不是生成后再裁，
-    这样模型的构图会按竖版设计。
-    """
-    style_map = {
-        "realistic": "写实摄影风格，自然光，浅景深，真实质感",
-        "clean": "干净极简风，柔和光线，纯色背景，留白充足",
-        "vivid": "色彩鲜明，视觉冲击强，高饱和",
-    }
-    desc = style_map.get(style, style_map["realistic"])
-
-    # 关键词与画面要点：让图承载内容，而不是一张泛泛的漂亮图
-    core = "、".join(ctx.core_terms)
-    points = ctx.key_points
-    parts = [
-        f"小红书封面图，3:4 竖版构图（1080×1440）。",
-        f"主题：{ctx.title}。",
-        f"风格：{desc}。",
-    ]
-    if core:
-        parts.append(f"画面需体现的核心概念：{core}。")
-    if points:
-        parts.append("画面要传达的信息点：" + "；".join(points[:3]) + "。")
-    if ctx.tags:
-        parts.append("相关品类参考：" + "、".join(ctx.tags[:4]) + "。")
-
-    parts.append(
-        "要求：主体突出，占画面 60% 以上；画面简洁；"
-        "文字区域不超过画面 30%；右下角预留信息区。"
-        "禁止出现：水印、二维码、联系方式、文字乱码。"
-    )
-    return "".join(parts)
+    return build_cover_spec(ctx, style).render()
 
 
-def build_inner_prompt(ctx: DraftContext, index: int, total: int) -> str:
-    """内页提示词，按顺序分配内容，且每张对应稿件的一个真实信息点。"""
-    roles = [
-        "产品全景展示",
-        "材质/工艺细节特写",
-        "使用场景实拍",
-        "对比效果呈现",
-        "核心卖点图解",
-        "选购/使用指引",
-    ]
-    role = roles[(index - 1) % len(roles)]
-    points = ctx.key_points
-    parts = [
-        f"小红书图文内页第 {index}/{total} 张，3:4 竖版（1080×1440）。",
-        f"主题：{ctx.title}。画面内容：{role}。",
-    ]
-    # ★ 关键：每张内页承载正文里的一个真实信息点，
-    #   而不是 6 张都用「产品全景」——那样图和文就各说各话。
-    if points:
-        idx = (index - 1) % len(points)
-        parts.append(f"本张要表达的信息点：{points[idx]}。")
-    if ctx.tags:
-        parts.append(f"品类参考：{'、'.join(ctx.tags[:3])}。")
-    parts.append(
-        "要求：写实摄影风格，主体清晰，构图简洁，"
-        "每张只讲一个点，不要堆砌信息。"
-        "禁止出现：水印、二维码、联系方式。"
-    )
-    return "".join(parts)
+def build_inner_prompt(ctx: DraftContext, index: int, total: int, style: str = "realistic") -> str:
+    return build_inner_spec(ctx, index, total, style).render()
 
 
 def build_video_prompt(ctx: DraftContext | str, scene: str = "") -> str:
-    """图生视频的运镜提示词。
-
-    ★ 注意：实际调用时以图片为主，提示词只描述运镜与动态，
-    AI 单镜头最佳 3-5 秒，画面才稳定不崩坏。
-    """
-    scene_map = {
-        "rotate": "镜头缓慢环绕主体，运动幅度小",
-        "push": "镜头缓慢推近主体",
-        "static": "镜头基本静止，只有主体轻微动作",
-        "detail": "镜头聚焦细节做微距移动",
-    }
-    motion = scene_map.get(scene, scene_map["static"])
-    title = ctx.title if isinstance(ctx, DraftContext) else str(ctx)
-    return (
-        f"基于首帧图生成短视频。主题：{title}。"
-        f"运镜：{motion}。"
-        f"要求：画面稳定不闪烁，人体/物体结构不变形，时长 3-5 秒。"
-    )
+    if isinstance(ctx, DraftContext):
+        return build_video_spec(ctx, scene).render()
+    return pe.video_spec(str(ctx), scene).render()
 
 
 # ── Provider 抽象 ─────────────────────────────────────────
@@ -421,10 +376,13 @@ def _local_placeholder(task: str, prompt: str, **kwargs) -> GenResult:
 
     _ensure_dirs()
     files: list[str] = []
-    seed = int(hashlib.md5(prompt.encode()).hexdigest()[:8], 16)
-    hue = seed % 360
+    base_seed = int(hashlib.md5(prompt.encode()).hexdigest()[:8], 16)
+    total = int(kwargs.get("count", 1))
 
-    for i in range(int(kwargs.get("count", 1))):
+    for i in range(total):
+        # ★ 每个候选错开色相，否则 3 张长得一模一样没法挑。
+        #   封面出 3 候选的意义就是 A/B，色调有差异才看得出差别。
+        hue = (base_seed + i * 37) % 360
         # HLS→RGB 在 colorsys，不在 PIL.ImageColor（踩过）
         r, g, b = colorsys.hls_to_rgb(hue / 360.0, 0.78, 0.92)
         img = Image.new("RGB", (COVER_W, COVER_H), (int(r * 255), int(g * 255), int(b * 255)))
@@ -435,11 +393,12 @@ def _local_placeholder(task: str, prompt: str, **kwargs) -> GenResult:
         path = GEN_IMG_DIR / name
 
         d.rectangle([60, 60, COVER_W - 60, 200], fill=(255, 255, 255))
-        d.text((90, 100), "占位图 · 待接AI 生图", fill=(120, 80, 20))
+        label = f"占位图 · 待接AI 生图" + (f"（候选 {i + 1}/{total}）" if total > 1 else "")
+        d.text((90, 100), label, fill=(120, 80, 20))
 
         # 底部标注尺寸
         d.text((90, COVER_H - 140), f"{COVER_W}x{COVER_H} (3:4)", fill=(90, 60, 30))
-        # 把提示词摘要画进图里 —— 这样即使不接真实API，
+        # 把提示词摘要画进图里 —— 这样即使不接真实 API，
         # 也能一眼看出「这张图用的什么提示词」，验证稿件→提示词是否串联
         short = prompt[:60].replace("\n", " ")
         d.text((90, COVER_H - 100), short, fill=(110, 80, 50))
@@ -463,24 +422,28 @@ def _local_placeholder(task: str, prompt: str, **kwargs) -> GenResult:
 
 def generate_cover(ctx: DraftContext, style: str = "realistic") -> GenResult:
     """生成封面（3 个候选，3:4）。"""
-    prompt = build_cover_prompt(ctx, style)
-    return _call_provider("cover", prompt, count=COVER_CANDIDATES)
+    spec = build_cover_spec(ctx, style)
+    r = _call_provider("cover", spec.render(), count=COVER_CANDIDATES, spec=spec)
+    r.meta = {**(r.meta or {}), "spec": spec.to_dict(), "spec_summary": spec.summary()}
+    return r
 
 
-def generate_inner(ctx: DraftContext, count: int = 6) -> GenResult:
+def generate_inner(ctx: DraftContext, count: int = 6, style: str = "realistic") -> GenResult:
     """生成内页（4-8 张，按顺序分配稿件信息点）。"""
     n = max(IMAGE_MIN, min(IMAGE_MAX, count))
     files: list[str] = []
     prompts: list[str] = []
+    specs: list[dict] = []
     for i in range(1, n + 1):
-        p = build_inner_prompt(ctx, i, n)
-        prompts.append(p)
-        r = _call_provider("inner", p, count=1)
+        spec = build_inner_spec(ctx, i, n, style)
+        prompts.append(spec.render())
+        specs.append(spec.to_dict())
+        r = _call_provider("inner", spec.render(), count=1, spec=spec)
         files.extend(r.files)
     return GenResult(
         ok=True, kind="inner", files=files,
         prompt=prompts[0] if prompts else "", provider=PROVIDER_NAME,
-        meta={"count": n, "prompts": prompts},
+        meta={"count": n, "prompts": prompts, "specs": specs},
     )
 
 

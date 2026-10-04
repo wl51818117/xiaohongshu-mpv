@@ -15,6 +15,7 @@ from sqlalchemy.orm import Session
 from app.db.models import Draft
 from app.db.session import get_db
 from app.services import asset_generator as ag
+from app.services import prompt_engine as pe
 
 router = APIRouter(prefix="/api/assets", tags=["assets"])
 
@@ -123,9 +124,10 @@ async def generate(
                 "tags": ctx.tags,
                 "body_len": len(ctx.body),
             },
+            "spec": (r.meta or {}).get("spec"),
         }
 
-    r = ag.generate_inner(ctx, count)
+    r = ag.generate_inner(ctx, count, style)
     if r.ok and r.files:
         # 内页追加（封面保持在首位）
         existing = list(draft.images or [])
@@ -143,6 +145,8 @@ async def generate(
             "tags": ctx.tags,
             "body_len": len(ctx.body),
         },
+        "prompts": (r.meta or {}).get("prompts", []),
+        "specs": (r.meta or {}).get("specs", []),
     }
 
 
@@ -150,6 +154,84 @@ async def generate(
 def get_provider() -> dict:
     """返回生图配置状态（**不含密钥明文**）。"""
     return ag.provider_status()
+
+
+@router.get("/prompt/styles", summary="可选风格与构图")
+def prompt_styles() -> dict:
+    """给前端风格/构图选择器用。"""
+    return {
+        "styles": pe.list_styles(),
+        "compositions": pe.list_compositions(),
+        "negatives": pe.XHS_BASE_NEGATIVES,
+    }
+
+
+class PromptPreviewIn(BaseModel):
+    """提示词预览/自定义。"""
+
+    draft_id: int
+    kind: str = Field("cover", description="cover / inner / video")
+    style: str = Field("realistic")
+    count: int = Field(6, ge=1, le=8, description="内页数量")
+    scene: str = Field("static", description="video运镜")
+    # 传了就用用户的结构化字段覆盖默认（逐字段覆盖，空的不覆盖）
+    override: dict = Field({}, description="结构化字段覆盖，如 {\"lighting\":\"暖光\"}")
+
+
+@router.post("/prompt/preview", summary="预览提示词（不消耗额度）")
+def prompt_preview(req: PromptPreviewIn, db: Session = Depends(get_db)) -> dict:
+    """生成结构化提示词供预览与编辑。
+
+    ★ 这是「提示词写法要规整」的落地方式：
+      1. 提示词由引擎按 schema 生成，不是散落的字符串拼接
+      2. 返回**结构化字段**，前端可逐块展示与覆盖
+      3. 预览不调生图 API，不消耗额度
+    """
+    draft = db.get(Draft, req.draft_id)
+    if not draft:
+        raise HTTPException(status_code=404, detail="稿件不存在")
+
+    title = draft.title or (draft.topic.title if draft.topic else "未命名")
+    keyword = draft.topic.keyword_target if draft.topic else ""
+    ctx = ag.DraftContext(
+        title=title,
+        keyword=keyword or "",
+        body=draft.body or "",
+        tags=list(draft.tags or []),
+        topic_title=(draft.topic.title if draft.topic else ""),
+    )
+
+    if req.kind == "cover":
+        spec = ag.build_cover_spec(ctx, req.style)
+    elif req.kind == "video":
+        spec = ag.build_video_spec(ctx, req.scene)
+    else:
+        n = max(ag.IMAGE_MIN, min(ag.IMAGE_MAX, req.count))
+        # 内页一次返回全部，字段结构一致便于对比
+        specs = [ag.build_inner_spec(ctx, i, n, req.style) for i in range(1, n + 1)]
+        return {
+            "ok": True,
+            "kind": "inner",
+            "count": n,
+            "items": [
+                {"index": i + 1, "spec": s.to_dict(),
+                 "prompt": s.render(), "summary": s.summary()}
+                for i, s in enumerate(specs)
+            ],
+        }
+
+    # 逐字段覆盖（只覆盖用户显式给了值的）
+    for k, v in (req.override or {}).items():
+        if hasattr(spec, k) and v not in (None, "", []):
+            setattr(spec, k, v)
+
+    return {
+        "ok": True,
+        "kind": req.kind,
+        "count": 1,
+        "items": [{"index": 1, "spec": spec.to_dict(),
+                    "prompt": spec.render(), "summary": spec.summary()}],
+    }
 
 
 class ProviderIn(BaseModel):
@@ -288,7 +370,16 @@ def gen_video(req: VideoRequest, db: Session = Depends(get_db)) -> dict:
         raise HTTPException(status_code=404, detail="稿件不存在")
 
     title = draft.title or (draft.topic.title if draft.topic else "未命名")
-    prompt = ag.build_video_prompt(title, req.scene)
+    keyword = draft.topic.keyword_target if draft.topic else ""
+    ctx = ag.DraftContext(
+        title=title,
+        keyword=keyword or "",
+        body=draft.body or "",
+        tags=list(draft.tags or []),
+    )
+    # ★ 走引擎而不是裸字符串：视频提示词也吃稿件核心词，
+    #   且结构化可复用（原来只传 title，核心词丢了）
+    spec = ag.build_video_spec(ctx, req.scene)
 
     src = req.first_frame
     real = ag.ASSET_ROOT.parent / src
@@ -298,7 +389,8 @@ def gen_video(req: VideoRequest, db: Session = Depends(get_db)) -> dict:
     return {
         "ok": True,
         "kind": "video",
-        "prompt": prompt,
+        "prompt": spec.render(),
+        "spec": spec.to_dict(),
         "first_frame": src,
         "provider": "pending-api",
         "note": (
