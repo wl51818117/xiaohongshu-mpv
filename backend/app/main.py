@@ -7,11 +7,13 @@
 from __future__ import annotations
 
 from contextlib import asynccontextmanager
+from pathlib import Path
 
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
+from fastapi.staticfiles import StaticFiles
 
-from app.api import agent, agent_data, bridge, drafts, pipeline
+from app.api import agent, agent_data, assets, bridge, drafts, pipeline
 from app.core.config import settings
 from app.db.session import init_db
 
@@ -54,6 +56,18 @@ app.include_router(agent_data.router)
 app.include_router(drafts.router)
 # bridge 桥接：让浏览器端能力接到内核（hbridge v2.1）
 app.include_router(bridge.router)
+# 素材工坊：AI 生图 / 图生视频 / ffmpeg 合成
+app.include_router(assets.router)
+
+
+# ── 生成的素材静态服务（封面/内页/视频）────────────────────
+# 素材在 backend/assets/ 下，_rel() 返回相对 backend 的路径（如
+# assets/images/cover_xxx.png），所以直接挂 backend 根目录，
+# 前端用 /files/assets/images/cover_xxx.png 引用。
+_BACKEND_DIR = Path(__file__).resolve().parent.parent
+_ASSETS_DIR = _BACKEND_DIR / "assets"
+if _ASSETS_DIR.exists():
+    app.mount("/files", StaticFiles(directory=str(_BACKEND_DIR)), name="files")
 
 
 @app.get("/", summary="服务信息")

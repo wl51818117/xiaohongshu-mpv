@@ -45,6 +45,8 @@ generated/
 output/
 outputs/
 assets/generated/
+# 素材工坊产出的图片与视频（AI 生图结果，可重新生成）
+backend/assets/
 *.mp4
 *.mov
 *.webm
