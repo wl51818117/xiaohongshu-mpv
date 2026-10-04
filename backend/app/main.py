@@ -11,7 +11,7 @@ from contextlib import asynccontextmanager
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 
-from app.api import agent, agent_data, drafts, pipeline
+from app.api import agent, agent_data, bridge, drafts, pipeline
 from app.core.config import settings
 from app.db.session import init_db
 
@@ -52,6 +52,8 @@ app.include_router(agent.router)
 app.include_router(agent_data.router)
 # 稿件接口：文案编辑与规格校验
 app.include_router(drafts.router)
+# bridge 桥接：让浏览器端能力接到内核（hbridge v2.1）
+app.include_router(bridge.router)
 
 
 @app.get("/", summary="服务信息")
