@@ -24,6 +24,35 @@ import httpx
 from app.core.config import settings
 
 
+# ── 历史经验注入（持续增强的接线点）───────────────────────
+
+def _inject_experience(prompt: str, limit: int = 3) -> str:
+    """把知识库里检索到的历史经验拼到提示词前面。
+
+    ★ 为什么放在这里：
+      ask() 是所有 LLM 调用的唯一出口。经验不是给人看的黑盒，
+      而是**真的要喂给模型**——否则知识库只是个手动查询的摆设。
+
+    用 prompt 前 500 字做检索输入：BM25 输入太长无益，也避免提示词膨胀。
+    检索失败不阻断主流程（知识库挂了不该导致生成失败）。
+    """
+    try:
+        from app.db.session import SessionLocal
+        from app.services import knowledge as kb
+
+        db = SessionLocal()
+        try:
+            block = kb.inject_experience(db, prompt[:500], limit=limit)
+        finally:
+            db.close()
+    except Exception:  # noqa: BLE001
+        return prompt
+
+    if not block:
+        return prompt
+    return block + prompt
+
+
 # ── 内核调用 ────────────────────────────────────────────
 
 def _model_key() -> str:
@@ -41,8 +70,17 @@ def _model_key() -> str:
 
 
 async def ask(prompt: str, session: str | None = None, timeout: int = 180) -> str:
-    """向内核提问，返回清洗后的纯文本。"""
-    # ★ 走 settings.kernel_auth_headers —— 内核接入凭据的唯一来源
+    """向内核提问，返回清洗后的纯文本。
+
+    ★ 这里是**所有** LLM 调用的唯一出口（gen_titles / polish / chat /
+      gen_tags 都走它），所以「注入历史经验」只需改这一处，全链路生效。
+      —— 这就是持续增强的接线点（借鉴 Reflexion：反思写进记忆，
+      下次任务带着它）。
+    """
+    # ── 注入历史经验（先查库，再拼进提示词）──
+    prompt = _inject_experience(prompt)
+
+    # hbridge v2.1 起 /v1/* 全部要鉴权，漏头就是 401
     headers = {"content-type": "application/json", **settings.kernel_auth_headers}
 
     payload: dict[str, Any] = {"text": prompt}
@@ -333,7 +371,22 @@ async def gen_titles(
         except Exception:  # noqa: BLE001
             pass  # 补生成失败不影响已拿到的结果
 
-    return good[:n]
+    result = good[:n]
+
+    # ── 沉淀：把成功/失败样本写回知识库（持续增强的闭环）──
+    # 借鉴 ExpeL：拿「一条成功 + 一条失败」对照提炼规则。
+    # 这里的「提炼」由确定性校验器完成（比 LLM 抽取可靠）。
+    try:
+        from app.services import experience as exp
+
+        exp.record_title_outcome(
+            topic=topic, keyword=keyword, persona=persona,
+            accepted=result, rejected=rejected,
+        )
+    except Exception:  # noqa: BLE001
+        pass  # 沉淀失败不影响生成结果
+
+    return result
 
 
 # ── 2. 多轮打磨 ────────────────────────────────────────

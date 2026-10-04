@@ -40,6 +40,19 @@ type Stats = {
   top_hit: { id: number; title: string; hits: number }[]
 }
 
+/** 持续增强概览 */
+type Growth = {
+  total: number
+  active: number
+  retired: number
+  strong: number
+  weak: number
+  total_hits: number
+  pending_review: number
+  top: { title: string; score: number; hits: number }[]
+  weakest: { title: string; score: number; hits: number }[]
+}
+
 const KIND_TONE: Record<string, 'red' | 'amber' | 'sky' | 'purple'> = {
   pitfall: 'red',
   spec: 'sky',
@@ -56,11 +69,44 @@ const KIND_LABEL: Record<string, string> = {
 
 export function KnowledgeBase({ onNotify }: { onNotify: (k: 'ok' | 'err', m: string) => void }) {
   const [stats, setStats] = useState<Stats | null>(null)
+  const [growth, setGrowth] = useState<Growth | null>(null)
   const [items, setItems] = useState<Item[]>([])
   const [mistakes, setMistakes] = useState<Mistake[]>([])
   const [q, setQ] = useState('')
   const [kind, setKind] = useState('')
   const [busy, setBusy] = useState(false)
+
+  const loadGrowth = useCallback(async () => {
+    try {
+      const r = await fetch('/api/knowledge/growth')
+      setGrowth(await r.json())
+    } catch {
+      /* 静默 */
+    }
+  }, [])
+
+  /** 投票：认可 +1 / 质疑 -1，分数归零自动退休 */
+  const vote = async (title: string, action: 'agree' | 'challenge') => {
+    try {
+      const r = await fetch('/api/knowledge/vote', {
+        method: 'POST',
+        headers: { 'content-type': 'application/json' },
+        body: JSON.stringify({ title, action }),
+      })
+      const d = await r.json()
+      if (d.ok) {
+        onNotify(
+          'ok',
+          action === 'agree'
+            ? `已认可「${title.slice(0, 20)}」→ ${d.score} 分`
+            : `已质疑「${title.slice(0, 20)}」→ ${d.status === 'retired' ? '已退休' : `${d.score} 分`}`
+        )
+        await Promise.all([loadGrowth(), loadItems()])
+      }
+    } catch (e) {
+      onNotify('err', (e as Error).message)
+    }
+  }
 
   const loadStats = useCallback(async () => {
     try {
@@ -105,6 +151,7 @@ export function KnowledgeBase({ onNotify }: { onNotify: (k: 'ok' | 'err', m: str
     void loadStats()
     void loadItems()
     void loadMistakes()
+    void loadGrowth()
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [kind])
 
@@ -141,8 +188,25 @@ export function KnowledgeBase({ onNotify }: { onNotify: (k: 'ok' | 'err', m: str
       await fetch(`/api/knowledge/mistakes/${id}/review`, { method: 'POST' })
       await loadMistakes()
       await loadStats()
+      await loadGrowth()
     } catch (e) {
       onNotify('err', `标记失败：${(e as Error).message}`)
+    }
+  }
+
+  /** 复盘结论晋升为正式经验 —— 这是「复盘」真正产生价值的一步 */
+  const promote = async (id: number) => {
+    try {
+      const r = await fetch(`/api/knowledge/mistakes/${id}/promote`, { method: 'POST' })
+      const d = await r.json()
+      if (!d.ok) {
+        onNotify('err', d.error || '晋升失败')
+        return
+      }
+      onNotify('ok', '已晋升为正式经验，之后 Agent 生成时会借鉴它')
+      await Promise.all([loadMistakes(), loadStats(), loadGrowth(), loadItems()])
+    } catch (e) {
+      onNotify('err', `晋升失败：${(e as Error).message}`)
     }
   }
 
@@ -168,6 +232,152 @@ export function KnowledgeBase({ onNotify }: { onNotify: (k: 'ok' | 'err', m: str
             value={stats.top_hit?.[0]?.hits ?? 0}
             hint={stats.top_hit?.[0]?.title?.slice(0, 12) ?? '暂无'}
           />
+        </div>
+      )}
+
+      {/* 持续增强面板：让「复盘 → 晋升 → 投票」在界面上可见 */}
+      {growth && (
+        <div className="card mb-4 p-4">
+          <div className="mb-3 flex items-center justify-between">
+            <div>
+              <div className="text-sm font-semibold text-stone-800 dark:text-stone-100">
+                持续增强
+              </div>
+              <div className="mt-0.5 text-[11px] text-stone-400">
+                经验被验证越多分数越高，长期没人用/被质疑会自动退休（借鉴 ExpeL 投票制）
+              </div>
+            </div>
+            <div className="flex gap-1.5">
+              <Button
+                variant="default"
+                size="xs"
+                loading={busy}
+                onClick={async () => {
+                  setBusy(true)
+                  try {
+                    const r = await fetch('/api/knowledge/import/obsidian', {
+                      method: 'POST',
+                      headers: { 'content-type': 'application/json' },
+                      body: JSON.stringify({ root: 'E:/ob知识库/codex', subdir: '' }),
+                    })
+                    const d = await r.json()
+                    if (d.ok) {
+                      onNotify(
+                        'ok',
+                        `已同步 Obsidian 全库：扫描 ${d.files_scanned} 个文件，新增 ${d.created} 条`
+                      )
+                      await Promise.all([loadStats(), loadItems(), loadGrowth()])
+                    }
+                  } catch (e) {
+                    onNotify('err', (e as Error).message)
+                  } finally {
+                    setBusy(false)
+                  }
+                }}
+              >
+                同步 OB 全库
+              </Button>
+              <Button
+                variant="ghost"
+                size="xs"
+                loading={busy}
+                onClick={async () => {
+                  setBusy(true)
+                  try {
+                    const r = await fetch('/api/knowledge/audit', { method: 'POST' })
+                    const d = await r.json()
+                    onNotify(
+                      d.skipped ? 'ok' : 'ok',
+                      d.skipped
+                        ? `暂不审查：${d.reason}`
+                        : `审查完成，退休 ${d.retired} 条低分经验`
+                    )
+                    await loadGrowth()
+                  } catch (e) {
+                    onNotify('err', (e as Error).message)
+                  } finally {
+                    setBusy(false)
+                  }
+                }}
+              >
+                审查低分
+              </Button>
+            </div>
+          </div>
+
+          <div className="mb-3 grid gap-2 sm:grid-cols-4">
+            <div className="rounded-[var(--r-sm)] bg-[var(--surface-2)] px-3 py-2">
+              <div className="text-[10px] text-stone-400">活跃经验</div>
+              <div className="text-base font-semibold tabular-nums text-stone-700 dark:text-stone-200">
+                {growth.active}
+              </div>
+            </div>
+            <div className="rounded-[var(--r-sm)] bg-[var(--surface-2)] px-3 py-2">
+              <div className="text-[10px] text-stone-400">已退休</div>
+              <div className="text-base font-semibold tabular-nums text-stone-500 dark:text-stone-400">
+                {growth.retired}
+              </div>
+            </div>
+            <div className="rounded-[var(--r-sm)] bg-[var(--surface-2)] px-3 py-2">
+              <div className="text-[10px] text-stone-400">注入模型</div>
+              <div className="text-base font-semibold tabular-nums text-brand-600 dark:text-brand-300">
+                {growth.total_hits}
+                <span className="ml-1 text-[10px] font-normal">次</span>
+              </div>
+            </div>
+            <div className="rounded-[var(--r-sm)] bg-[var(--surface-2)] px-3 py-2">
+              <div className="text-[10px] text-stone-400">待复盘</div>
+              <div
+                className={`text-base font-semibold tabular-nums ${
+                  growth.pending_review > 0
+                    ? 'text-amber-600 dark:text-amber-400'
+                    : 'text-stone-500'
+                }`}
+              >
+                {growth.pending_review}
+              </div>
+            </div>
+          </div>
+
+          {growth.top?.length > 0 && (
+            <div>
+              <div className="mb-1.5 text-[11px] font-medium text-stone-500">
+                投票分最高的经验（检索时优先注入）
+              </div>
+              <div className="space-y-1">
+                {growth.top.slice(0, 4).map((t) => (
+                  <div
+                    key={t.title}
+                    className="flex items-center gap-2 rounded-[var(--r-sm)] px-2 py-1 text-[11px] hover:bg-[var(--surface-2)]"
+                  >
+                    <span className="shrink-0 rounded bg-emerald-50 px-1.5 py-0.5 font-medium tabular-nums text-emerald-700 dark:bg-emerald-500/15 dark:text-emerald-300">
+                      {t.score}分
+                    </span>
+                    <span className="min-w-0 flex-1 truncate text-stone-600 dark:text-stone-300">
+                      {t.title}
+                    </span>
+                    <span className="shrink-0 text-[10px] text-stone-400">
+                      命中 {t.hits}
+                    </span>
+                    <button
+                      onClick={() => void vote(t.title, 'agree')}
+                      className="shrink-0 text-[10px] text-brand-600 hover:underline dark:text-brand-300"
+                      title="我认可这条经验（+1 分）"
+                    >
+                      认可
+                    </button>
+                    <button
+                      onClick={() => void vote(t.title, 'challenge')}
+                      className="shrink-0 text-[10px] text-stone-400 hover:text-red-600 hover:underline"
+                      title="这条不适用（-1 分）"
+                    >
+                      质疑
+                    </button>
+                  </div>
+                ))}
+              </div>
+            </div>
+          )}
         </div>
       )}
 
@@ -237,9 +447,23 @@ export function KnowledgeBase({ onNotify }: { onNotify: (k: 'ok' | 'err', m: str
                 {m.reviewed ? (
                   <Tag tone="green">已复盘</Tag>
                 ) : (
-                  <Button variant="default" size="xs" onClick={() => markReviewed(m.id)}>
-                    标记已复盘
-                  </Button>
+                  <div className="flex shrink-0 flex-col gap-1">
+                    <Button
+                      variant="primary"
+                      size="xs"
+                      onClick={() => void promote(m.id)}
+                      title="复盘结论沉淀成正式经验，之后会被 Agent 检索到"
+                    >
+                      晋升为经验
+                    </Button>
+                    <Button
+                      variant="ghost"
+                      size="xs"
+                      onClick={() => markReviewed(m.id)}
+                    >
+                      标记已复盘
+                    </Button>
+                  </div>
                 )}
               </div>
             ))}

@@ -9,7 +9,7 @@ import './index.css'
  * React 18/19 的 StrictMode 在开发模式下会故意二次挂载组件以暴露副作用问题，
  * 这会导致 X6 重复初始化/ 残留画布节点（典型表现：页面白屏或节点叠加）。
  *
- * 若将来要恢复 StrictMode，需在 FlowCanvas 的 useEffect 里做严格的
+ * 若将来要恢复 StrictMode，需在相关组件的 useEffect 里做严格的
  * 幂等保护（用 ref 记录已初始化状态）。
  */
 createRoot(document.getElementById('root')!).render(<App />)

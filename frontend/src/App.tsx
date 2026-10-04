@@ -22,7 +22,7 @@ import {
 } from './components/ui'
 import { AgentChat } from './components/AgentChat'
 import { BREAKPOINT_NARROW, useMediaQuery } from './hooks/useMediaQuery'
-import { FlowCanvas } from './components/FlowCanvas'
+import { MindMap } from './components/MindMap'
 import { PageScaffold } from './components/PageScaffold'
 import { WritingDesk } from './components/WritingDesk'
 import { AssetStudio } from './components/AssetStudio'
@@ -30,7 +30,7 @@ import { AnalyticsBoard } from './components/AnalyticsBoard'
 import { KnowledgeBase } from './components/KnowledgeBase'
 import { SettingsPanel } from './components/SettingsPanel'
 import { AgentPanels } from './components/AgentPanels'
-import { buildStepStatus, stepsOf, type StepStatus } from './lib/flow'
+import { buildStepStatus, stepsOf, STEPS } from './lib/flow'
 import { connectWorkbench, type ViewState, type WorkbenchOps } from './bridge/workbench-ops'
 
 type Tab =
@@ -82,6 +82,8 @@ export default function App() {
     drafts: draftStat,
     published: 0,
   }
+  /** 思维导图当前展示的链路（图文/视频） */
+  const [pipelineType, setPipelineType] = useState<'image' | 'video'>('image')
   const imageStatus = useMemo(
     () => buildStepStatus('image', flowStats),
     [flowStats.materials, flowStats.topics, flowStats.drafts],
@@ -653,40 +655,85 @@ export default function App() {
                 desc="点击任一环节直接进入对应工作页。状态由真实数据计算，虚线表示尚未完成。"
               />
 
-              {/* 图文链路 */}
-              <div className="card p-5">
-                <div className="mb-1 flex items-center gap-2">
-                  <span className="rounded-md bg-sky-100 px-2 py-0.5 text-xs font-medium text-sky-700">
-                    图文链路
-                  </span>
-                  <span className="text-xs text-stone-400">
-                    {stepsOf('image').length} 个环节 · 生命周期约 15-20 天
-                  </span>
-                </div>
-                <FlowCanvas
-                  kind="image"
-                  statuses={imageStatus}
-                  onEnter={(route) => enterStep(route)}
-                />
-                <StepLegend statuses={imageStatus} kind="image" />
-              </div>
+              {/* 思维导图：树状表达分支与汇聚，比流程图更适合看全貌 */}
+              <MindMap
+                statusOf={(id) =>
+                  (pipelineType === 'video' ? videoStatus : imageStatus)[
+                    id as keyof typeof imageStatus
+                  ] ?? 'pending'
+                }
+                onGo={(route) => enterStep(route)}
+                pipelineType={pipelineType}
+              />
 
-              {/* 视频链路 */}
+              {/* 两条链路的分工（保留：这是决策性信息，导图不替代） */}
               <div className="card p-5">
-                <div className="mb-1 flex items-center gap-2">
-                  <span className="rounded-md bg-violet-100 px-2 py-0.5 text-xs font-medium text-violet-700">
-                    视频链路
-                  </span>
-                  <span className="text-xs text-stone-400">
-                    {stepsOf('video').length} 个环节 · 长尾可达 90 天
-                  </span>
+                <div className="mb-3 flex items-center justify-between">
+                  <div className="flex items-center gap-2">
+                    <span className="rounded-md bg-sky-100 px-2 py-0.5 text-xs font-medium text-sky-700">
+                      图文链路
+                    </span>
+                    <span className="text-xs text-stone-400">
+                      {stepsOf('image').length} 个环节 · 生命周期约 15-20 天
+                    </span>
+                  </div>
+                  <div className="flex items-center gap-2">
+                    <span className="rounded-md bg-violet-100 px-2 py-0.5 text-xs font-medium text-violet-700">
+                      视频链路
+                    </span>
+                    <span className="text-xs text-stone-400">
+                      {stepsOf('video').length} 个环节 · 长尾可达 90 天
+                    </span>
+                  </div>
                 </div>
-                <FlowCanvas
-                  kind="video"
-                  statuses={videoStatus}
-                  onEnter={(route) => enterStep(route)}
-                />
-                <StepLegend statuses={videoStatus} kind="video" />
+                <div className="grid gap-3 md:grid-cols-2">
+                  {(['image', 'video'] as const).map((kind) => (
+                    <button
+                      key={kind}
+                      onClick={() => setPipelineType(kind)}
+                      className={`rounded-[var(--r-md)] border px-3 py-2.5 text-left transition-colors ${
+                        pipelineType === kind
+                          ? 'border-brand-300 bg-brand-50/60 dark:border-brand-500/40 dark:bg-brand-500/10'
+                          : 'border-[var(--border)] hover:border-[var(--border-strong)]'
+                      }`}
+                    >
+                      <div className="mb-1.5 flex items-center justify-between">
+                        <span className="text-[12px] font-medium text-stone-700 dark:text-stone-200">
+                          {kind === 'image' ? '图文抢搜索流量' : '视频冲推荐流量'}
+                        </span>
+                        <span className="text-[10px] text-stone-400">
+                          {kind === 'image' ? '15-20天' : '90天长尾'}
+                        </span>
+                      </div>
+                      <div className="space-y-1">
+                        {(kind === 'image' ? imageStatus : videoStatus) &&
+                          Object.entries(kind === 'image' ? imageStatus : videoStatus).map(
+                            ([sid, st]) => (
+                              <div
+                                key={sid}
+                                className="flex items-center gap-1.5 text-[11px]"
+                              >
+                                <span
+                                  className={`h-1 w-1 shrink-0 rounded-full ${
+                                    st === 'done'
+                                      ? 'bg-emerald-500'
+                                      : st === 'active'
+                                        ? 'bg-amber-500'
+                                        : st === 'blocked'
+                                          ? 'bg-red-500'
+                                          : 'bg-stone-300 dark:bg-zinc-600'
+                                  }`}
+                                />
+                                <span className="text-stone-500 dark:text-stone-400">
+                                  {STEPS.find((x) => x.id === sid)?.title ?? sid}
+                                </span>
+                              </div>
+                            ),
+                          )}
+                      </div>
+                    </button>
+                  ))}
+                </div>
               </div>
 
               <div className="mt-4 rounded-lg border border-amber-200 bg-amber-50 px-4 py-3 text-xs leading-relaxed text-amber-800">
@@ -1172,45 +1219,6 @@ export default function App() {
           </div>
         </div>
       )}
-    </div>
-  )
-}
-
-/** 流程图图例：展示各状态的含义与当前进度 */
-function StepLegend({
-  statuses,
-  kind,
-}: {
-  statuses: Record<string, StepStatus>
-  kind: 'image' | 'video'
-}) {
-  const list = stepsOf(kind)
-  const done = list.filter((s) => statuses[s.id] === 'done').length
-  const active = list.find((s) => statuses[s.id] === 'active')
-  const pct = Math.round((done / list.length) * 100)
-
-  return (
-    <div className="mt-4 flex flex-wrap items-center gap-x-5 gap-y-2 border-t border-stone-200 pt-3">
-      <span className="flex items-center gap-1.5 text-xs text-stone-500">
-        <span className="h-2.5 w-2.5 rounded-sm border-[1.5px] border-emerald-500 bg-emerald-50" />
-        已完成
-      </span>
-      <span className="flex items-center gap-1.5 text-xs text-stone-500">
-        <span className="h-2.5 w-2.5 rounded-sm border-[1.5px] border-orange-600 bg-orange-50" />
-        待进行
-      </span>
-      <span className="flex items-center gap-1.5 text-xs text-stone-500">
-        <span className="h-2.5 w-2.5 rounded-sm border-[1.5px] border-stone-300 bg-white" />
-        未开始
-      </span>
-
-      <span className="ml-auto text-xs text-stone-500">
-        进度 <span className="font-medium tabular-nums text-stone-700">{done}/{list.length}</span>
-        <span className="ml-1 text-stone-400">({pct}%)</span>
-        {active && (
-          <span className="ml-2 text-orange-700">下一步：{active.title}</span>
-        )}
-      </span>
     </div>
   )
 }

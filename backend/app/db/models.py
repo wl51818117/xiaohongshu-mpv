@@ -202,6 +202,15 @@ class KnowledgeItem(Base):
     related: Mapped[str] = mapped_column(Text, default="")   # 关联
     tags: Mapped[str] = mapped_column(String(300), default="")
     source: Mapped[str] = mapped_column(String(200), default="")
+    # ── 投票分（借鉴 ExpeL 的 rule count）──
+    # 借鉴 GitHub LeapLabTHU/ExpeL 的经验库算法：
+    # 规则不是"有或没有"，而是"被验证过多少次"。
+    #   新增 +2 / 被再次验证 +1 / 改写 +1 / 被质疑 -1
+    # score <= 0 自动退休（不物理删除，保留历史）。
+    # 这样经验库能"沉淀 + 淘汰"自动循环，不会越存越乱。
+    score: Mapped[int] = mapped_column(Integer, default=2, index=True)
+    # status: active 在用 / retired 退休（score<=0）/ deprecated 已过时
+    status: Mapped[str] = mapped_column(String(20), default="active", index=True)
     # 使用统计：被检索到几次 —— 支持「定期回顾」挑高频条目复看
     hit_count: Mapped[int] = mapped_column(Integer, default=0)
     last_hit_at: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)

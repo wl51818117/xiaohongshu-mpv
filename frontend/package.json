@@ -9,8 +9,6 @@
     "preview": "vite preview"
   },
   "dependencies": {
-    "@antv/x6": "^3.1.8",
-    "@antv/x6-react-shape": "^3.0.1",
     "esbuild": "^0.28.2",
     "react": "^19.0.0",
     "react-dom": "^19.0.0",

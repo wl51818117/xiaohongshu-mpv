@@ -146,3 +146,105 @@ def add_mistake(req: MistakeIn, db: Session = Depends(get_db)) -> dict[str, Any]
 @router.post("/mistakes/{mistake_id}/review", summary="标记已复盘")
 def review(mistake_id: int, db: Session = Depends(get_db)) -> dict[str, Any]:
     return kb.mark_reviewed(db, mistake_id)
+
+
+# ── 持续增强：投票分 / 晋升 / 审查 ──────────────────────────
+
+class VoteIn(BaseModel):
+    """对一条经验投票。"""
+
+    title: str = Field(..., min_length=1)
+    action: Literal["add", "agree", "edit", "remove", "challenge"] = Field(
+        "add",
+        description=(
+            "add 新增(+2) / agree 再次验证(+1) / edit 改写(+1) / "
+            "remove 质疑(-1，库满时-3) / challenge 质疑(-1)"
+        ),
+    )
+    why: str = ""
+    how: str = ""
+    pitfall: str = ""
+    tags: str = ""
+
+
+@router.post("/vote", summary="对经验投票（维护投票分）")
+def vote(req: VoteIn, db: Session = Depends(get_db)) -> dict[str, Any]:
+    """投票分借鉴 ExpeL 的规则库算法。
+
+    分数 <= 0 自动退休（不物理删除，保留历史）。
+    """
+    return kb.apply_vote(
+        db, title=req.title, action=req.action, why=req.why,
+        how=req.how, pitfall=req.pitfall, tags=req.tags,
+    )
+
+
+@router.post("/mistakes/{mistake_id}/promote", summary="复盘结论晋升为正式经验")
+def promote(mistake_id: int, db: Session = Depends(get_db)) -> dict[str, Any]:
+    """错误本 → 知识库。这是「复盘」的核心动作。
+
+    借鉴 ADR 的做法：被否决/出错的记录永不删除，
+    晋升后仍能在错误本里看到当时的场景。
+    """
+    return kb.promote_mistake(db, mistake_id)
+
+
+@router.post("/audit", summary="定期审查：退休低分经验")
+def audit() -> dict[str, Any]:
+    """借鉴 Generative Agents 的 importance_trigger：
+    库变大时自动批量审查，而不是无限增长。
+    """
+    from app.services import experience as exp
+
+    return exp.audit_low_score()
+
+
+@router.get("/growth", summary="持续增强概览")
+def growth(db: Session = Depends(get_db)) -> dict[str, Any]:
+    """看闭环是否真的在转：沉淀了多少、投票分布、活跃度。"""
+    from sqlalchemy import func, select
+
+    from app.db.models import KnowledgeItem
+
+    total = db.execute(select(func.count(KnowledgeItem.id))).scalar_one()
+    active = db.execute(
+        select(func.count(KnowledgeItem.id)).where(KnowledgeItem.status == "active")
+    ).scalar_one()
+    retired = total - active
+    strong = db.execute(
+        select(func.count(KnowledgeItem.id)).where(KnowledgeItem.score >= 4)
+    ).scalar_one()
+    weak = db.execute(
+        select(func.count(KnowledgeItem.id)).where(KnowledgeItem.score <= 2)
+    ).scalar_one()
+    hits = db.execute(select(func.sum(KnowledgeItem.hit_count))).scalar_one() or 0
+    mistakes = kb.search_mistakes(db, "", 999)
+    pending = sum(1 for m in mistakes if not m["reviewed"])
+
+    return {
+        "total": total,
+        "active": active,
+        "retired": retired,
+        "strong": strong,
+        "weak": weak,
+        "total_hits": int(hits),
+        "pending_review": pending,
+        "top": [
+            {"title": r.title, "score": r.score, "hits": r.hit_count}
+            for r in db.execute(
+                select(KnowledgeItem)
+                .where(KnowledgeItem.status == "active")
+                .order_by(KnowledgeItem.score.desc(), KnowledgeItem.hit_count.desc())
+                .limit(8)
+            ).scalars()
+        ],
+        "weakest": [
+            {"title": r.title, "score": r.score, "hits": r.hit_count}
+            for r in db.execute(
+                select(KnowledgeItem)
+                .where(KnowledgeItem.status == "active")
+                .order_by(KnowledgeItem.score.asc(), KnowledgeItem.hit_count.asc())
+                .limit(5)
+            ).scalars()
+        ],
+    }
