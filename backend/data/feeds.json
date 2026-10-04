@@ -2,67 +2,148 @@
   "_说明": "RSS 源配置。改这个文件即可换赛道，不用改代码。",
   "_用法": "流水线页选预设，或 POST /api/pipeline/collect 传 { preset: 'xxx' }",
   "_实测说明": "以下源均于 2026-10-04 用 curl 实测可返回 200。标注「需自建」的源依赖 RSSHub 公共实例（不稳定），建议自建。",
-
-  "presets": {
-    "tech": {
+  "presets": [
+    {
+      "key": "tech",
       "label": "科技 / AI",
       "desc": "数码工具、AI 应用、互联网动态",
       "feeds": [
-        { "name": "InfoQ中文", "url": "https://www.infoq.cn/feed", "category": "技术" },
-        { "name": "36氪", "url": "https://36kr.com/feed", "category": "科技商业" },
-        { "name": "少数派", "url": "https://sspai.com/feed", "category": "效率" },
-        { "name": "爱范儿", "url": "https://www.ifanr.com/feed", "category": "消费电子" }
+        {
+          "name": "InfoQ中文",
+          "url": "https://www.infoq.cn/feed",
+          "category": "技术"
+        },
+        {
+          "name": "36氪",
+          "url": "https://36kr.com/feed",
+          "category": "科技商业"
+        },
+        {
+          "name": "少数派",
+          "url": "https://sspai.com/feed",
+          "category": "效率"
+        },
+        {
+          "name": "爱范儿",
+          "url": "https://www.ifanr.com/feed",
+          "category": "消费电子"
+        }
       ]
     },
-    "general": {
+    {
+      "key": "general",
       "label": "综合 / 热点",
       "desc": "泛生活、社会热点、趋势观察。适合找选题灵感",
       "feeds": [
-        { "name": "界面新闻", "url": "https://a.jiemian.com/index.php?m=article&a=rss", "category": "商业" },
-        { "name": "36氪", "url": "https://36kr.com/feed", "category": "科技商业" },
-        { "name": "少数派", "url": "https://sspai.com/feed", "category": "生活" },
-        { "name": "爱范儿", "url": "https://www.ifanr.com/feed", "category": "消费" }
+        {
+          "name": "界面新闻",
+          "url": "https://a.jiemian.com/index.php?m=article&a=rss",
+          "category": "商业"
+        },
+        {
+          "name": "36氪",
+          "url": "https://36kr.com/feed",
+          "category": "科技商业"
+        },
+        {
+          "name": "少数派",
+          "url": "https://sspai.com/feed",
+          "category": "生活"
+        },
+        {
+          "name": "爱范儿",
+          "url": "https://www.ifanr.com/feed",
+          "category": "消费"
+        }
       ]
     },
-    "lifestyle": {
+    {
+      "key": "lifestyle",
       "label": "生活 / 消费",
       "desc": "生活方式、消费品、家居、品质",
       "feeds": [
-        { "name": "少数派", "url": "https://sspai.com/feed", "category": "生活" },
-        { "name": "爱范儿", "url": "https://www.ifanr.com/feed", "category": "消费" },
-        { "name": "界面新闻", "url": "https://a.jiemian.com/index.php?m=article&a=rss", "category": "商业" },
-        { "name": "Vogue时尚网", "url": "https://www.vogue.com.cn/feed/", "category": "时尚" }
+        {
+          "name": "少数派",
+          "url": "https://sspai.com/feed",
+          "category": "生活"
+        },
+        {
+          "name": "爱范儿",
+          "url": "https://www.ifanr.com/feed",
+          "category": "消费"
+        },
+        {
+          "name": "界面新闻",
+          "url": "https://a.jiemian.com/index.php?m=article&a=rss",
+          "category": "商业"
+        },
+        {
+          "name": "Vogue时尚网",
+          "url": "https://www.vogue.com.cn/feed/",
+          "category": "时尚"
+        }
       ]
     },
-    "fashion": {
+    {
+      "key": "fashion",
       "label": "服饰 / 内衣 / 穿搭",
       "desc": "服装行业、穿搭趋势。★ 内衣电商账号适用；RSS 源有限，建议自建 RSSHub 补充",
       "feeds": [
-        { "name": "Vogue时尚网", "url": "https://www.vogue.com.cn/feed/", "category": "时尚" },
-        { "name": "界面新闻", "url": "https://a.jiemian.com/index.php?m=article&a=rss", "category": "商业" },
-        { "name": "爱范儿", "url": "https://www.ifanr.com/feed", "category": "消费" },
-        { "name": "少数派", "url": "https://sspai.com/feed", "category": "生活" }
-      ],
-      "_建议": "服装垂直类 RSS 很少且易失效。推荐自建 RSSHub 后补充淘宝/抖音/小红书公开榜单页（仅取标题做选题，不搬运原文）。"
+        {
+          "name": "Vogue时尚网",
+          "url": "https://www.vogue.com.cn/feed/",
+          "category": "时尚"
+        },
+        {
+          "name": "界面新闻",
+          "url": "https://a.jiemian.com/index.php?m=article&a=rss",
+          "category": "商业"
+        },
+        {
+          "name": "爱范儿",
+          "url": "https://www.ifanr.com/feed",
+          "category": "消费"
+        },
+        {
+          "name": "少数派",
+          "url": "https://sspai.com/feed",
+          "category": "生活"
+        }
+      ]
     },
-    "ecom": {
+    {
+      "key": "ecom",
       "label": "电商 / 零售",
       "desc": "电商运营、零售趋势、消费洞察",
       "feeds": [
-        { "name": "36氪", "url": "https://36kr.com/feed", "category": "科技商业" },
-        { "name": "界面新闻", "url": "https://a.jiemian.com/index.php?m=article&a=rss", "category": "商业" },
-        { "name": "爱范儿", "url": "https://www.ifanr.com/feed", "category": "消费" },
-        { "name": "少数派", "url": "https://sspai.com/feed", "category": "电商" }
+        {
+          "name": "36氪",
+          "url": "https://36kr.com/feed",
+          "category": "科技商业"
+        },
+        {
+          "name": "界面新闻",
+          "url": "https://a.jiemian.com/index.php?m=article&a=rss",
+          "category": "商业"
+        },
+        {
+          "name": "爱范儿",
+          "url": "https://www.ifanr.com/feed",
+          "category": "消费"
+        },
+        {
+          "name": "少数派",
+          "url": "https://sspai.com/feed",
+          "category": "电商"
+        }
       ]
     }
-  },
-
+  ],
   "_失效源备查": {
     "ELLE时尚网": "https://www.ellechina.com/rss/feed.xml — 连接失败",
     "穿针引线": "https://www.ts.cn/feed — 404",
     "纺织服装周刊": "http://www.fabricmag.com/rss.xml — 502",
     "果壳": "https://www.guokr.com/rss — 404"
   },
-
   "_自建源提示": "RSSHub（https://rsshub.app）可把任意网站变成 RSS。公共实例不稳定，建议 Docker 自建后把地址填进 presets。"
 }

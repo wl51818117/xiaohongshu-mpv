@@ -73,13 +73,15 @@ def pipeline_status(db: Session = Depends(get_db)) -> dict:
     }
 
 
-@router.get("/pipeline/feeds", summary="赛道预设列表")
+@router.get("/pipeline/feeds", summary="赛道预设列表（兼容旧路径）")
 def list_feeds() -> dict:
     """返回可用的赛道预设，供前端下拉选择。
 
-    换赛道只需改 backend/data/feeds.json，不用动代码。
+    已合并到 /api/feeds（设置里可视化编辑），此路径保留兼容。
     """
-    return {"presets": rss_collector.list_presets()}
+    from app.api.feeds import list_feeds as _new_list_feeds
+
+    return _new_list_feeds()
 
 
 @router.post("/pipeline/collect", summary="环节一：RSS 采集入库")
