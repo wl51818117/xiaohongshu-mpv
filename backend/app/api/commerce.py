@@ -72,6 +72,9 @@ class SuggestIn(BaseModel):
     product_id: int
     limit: int = Field(10, ge=1, le=40)
     intent_stages: list[str] = Field(default_factory=list)
+    #★ 最低证据数。默认 3 = 跨来源印证。
+    #   设成 0 会拿到拍脑袋的痛点，所以默认卡住。
+    min_evidence: int = Field(3, ge=0, le=50)
 
 
 # ── 商品 ────────────────────────────────────────────────────
@@ -263,25 +266,91 @@ def suggest_topics(req: SuggestIn, db: Session = Depends(get_db)) -> dict[str, A
       RSS 转换问「发生了什么」，产出「月广州海关监」这种滑窗碎片；
       这里问「目标用户在这个场景会搜什么」，产出的是**完整搜索句**。
 
-    公式：Persona.concerns × Product.pain_points × scenes × intent_stage
-    其中场景做**人群适配过滤**（差旅人群不与经期场景组合）。
+    ★★ 2026-10 改造：从「拍脑袋」改为「吃需求证据」——
+      痛点来源改为 `DemandSignal` 表（带verbatim 用户原话 + 来源 + 证据数），
+      只取 `evidence_count >= min_evidence`（默认 3，跨来源印证）的需求。
+      需求不足时**明确告知**而不是硬编——宁可返回空，也不要假装有依据。
     """
     product = db.get(Product, req.product_id)
     if not product:
         raise HTTPException(status_code=404, detail="商品不存在")
-    if not product.pain_points or not product.scenes:
+
+    # ── 需求来源：优先用带证据的需求信号 ──
+    from app.db.models import DemandSignal
+
+    demand_rows = list(
+        db.execute(
+            select(DemandSignal)
+            .where(
+                DemandSignal.evidence_count >= req.min_evidence,
+                DemandSignal.topic != "未归类",
+            )
+            .order_by(DemandSignal.evidence_count.desc())
+        ).scalars()
+    )
+
+    demands_ready = len(demand_rows) >= 3
+    engine_note = ""
+
+    if not demand_rows:
+        # 没有高置信度需求 → 明确告知，不编
+        return {
+            "ok": False,
+            "count": 0,
+            "items": [],
+            "engine_ready": False,
+            "reason": f"没有证据数 ≥{req.min_evidence} 的需求信号。",
+            "hint": (
+                "选题引擎现在只信带证据的需求（跨来源印证 ≥3 次）。"
+                "请先到「需求采集」录入：1688 询盘、电商中评/差评、"
+                "小红书评论区用户原话。\n"
+                "在需求库为空时生成选题，本质还是 AI 拍脑袋——"
+                "这正是之前选题跑偏的根因，所以这里刻意不做兜底。"
+            ),
+        }
+
+    if not demands_ready:
+        engine_note = (
+            f"⚠️ 高置信度需求仅 {len(demand_rows)} 条（建议 ≥5），"
+            f"选题多样性会受限。置信度门槛 {req.min_evidence} 可临时调低以看更多，"
+            f"但那些是单渠道数据，慎用。"
+        )
+
+    # 需求按 topic 聚成「痛点 → 用户原话」
+    topic_verbatims: dict[str, list[str]] = {}
+    topic_count: dict[str, int] = {}
+    for r in demand_rows:
+        topic_verbatims.setdefault(r.topic, []).append(r.verbatim)
+        topic_count[r.topic] = max(topic_count.get(r.topic, 0), r.evidence_count)
+
+    # 商品没有 pain_points 时，用需求反推
+    # ★ 需求 topic（带证据数，降序）优先于 product.pain_points。
+    #   理由：pain_points 是「我们认为产品能解决什么」，
+    #   需求表是「用户实际抱怨什么」——后者才是选题的输入。
+    #   实测：选题的 evidence_count 全是 0，因为 pain_points 里的词
+    #   在需求表里根本不存在，等于用假数据且看不出来。
+    ranked_topics = sorted(
+        topic_count.items(), key=lambda x: -x[1]
+    )
+    pains = [t for t, _ in ranked_topics[:6]]
+    if not pains:
+        pains = list(product.pain_points or [])
+    if not pains:
         raise HTTPException(
             status_code=400,
-            detail="该商品的 pain_points 或 scenes 为空，无法生成选题。"
-            "请先补全——它们是选题的输入",
+            detail="既没有带证据的需求，也没有商品 pain_points，无法生成选题",
         )
+
+    scenes = list(product.scenes or [])
+    if not scenes:
+        # 从需求里的场景字段反推
+        scenes = list({r.scene for r in demand_rows if r.scene})[:5] or ["日常"]
 
     personas = list(db.execute(select(Persona)).scalars())
     if not personas:
-        # 没有人群卡时给一个默认占位，让功能仍可用
         personas = [_DEFAULT_PERSONA]
 
-    # 已经用过的选题，避免重复建议
+    # 已用过的选题，避免重复
     existing_kw = {
         t.keyword_target
         for t in db.execute(select(Topic)).scalars()
@@ -290,25 +359,24 @@ def suggest_topics(req: SuggestIn, db: Session = Depends(get_db)) -> dict[str, A
 
     out: list[dict[str, Any]] = []
     stages = req.intent_stages or ["认知", "对比", "决策", "复购"]
-    # ★ 用中文展示词，不用英文 category —— 用户搜的是中文
     product_word = _CATEGORY_WORDS.get(product.category or "", product.name[:4])
-    pains = product.pain_points or []
 
     for ps in personas:
-        concerns = ps.concerns or pains
-        # ★ 场景做人群适配，而不是全笛卡尔积
-        scenes = _scenes_for(ps.name or "", product.scenes or [])
-        for scene in scenes:
+        # ★ 痛点来源优先级：**需求表（有证据）> Persona.concerns（可能是拍脑袋）**
+        #   实测踩过的坑：Persona.concerns 里塞的是我编的「酒店公用贴身用品」，
+        #   它在需求表里不存在，evidence_count 自然是 0——
+        #   等于选题引擎在用假数据，且看不出假。
+        concerns = pains or list(ps.concerns or [])
+        s_list = _scenes_for(ps.name or "", scenes)
+        for scene in s_list:
             for stage in stages:
                 tpl, intent, body_tpl = _INTENT_TEMPLATES[stage]
-                for concern in (concerns[:2] or pains[:1]):
-                    # 人群名去掉「女性/男性」等后缀做标题更短
+                for concern in concerns[:3]:
                     pname = (ps.name or "").replace("女性", "").replace("男性", "")
                     scene_word = _SCENE_WORDS.get(scene, scene)
-                    # ★ 去掉场景与人群名的重复：「差旅职场」+「出差」→ 只留一个
-                    if pname and scene_word and scene_word in pname:
-                        scene_prefix = ""
-                    elif pname.startswith(scene_word) or pname.startswith(scene):
+                    if pname and scene_word and (
+                        scene_word in pname or pname.startswith(scene)
+                    ):
                         scene_prefix = ""
                     else:
                         scene_prefix = scene_word
@@ -321,6 +389,9 @@ def suggest_topics(req: SuggestIn, db: Session = Depends(get_db)) -> dict[str, A
                     kw = re.sub(r"\s+", "", kw).strip()[:20]
                     if not kw or kw in existing_kw or any(o["keyword"] == kw for o in out):
                         continue
+
+                    # ★ 附上这条选题背后的需求证据——让使用者能判断可信度
+                    evidence = topic_verbatims.get(concern, [])[:2]
                     out.append({
                         "keyword": kw,
                         "search_intent": kw,
@@ -332,15 +403,27 @@ def suggest_topics(req: SuggestIn, db: Session = Depends(get_db)) -> dict[str, A
                         "intent_stage": stage,
                         "commercial_intent": intent,
                         "product_id": product.id,
-                        "evidence": (product.certs or [])[:2],
+                        "evidence_count": topic_count.get(concern, 0),
+                        "user_verbatim": evidence,
+                        "certs": (product.certs or [])[:2],
                         "body_outline": body_tpl.format(
-                            persona=ps.name, concern=concern, product_word=product_word
+                            persona=ps.name,
+                            concern=concern,
+                            product_word=product_word,
                         ),
                     })
                     if len(out) >= req.limit:
-                        return {"ok": True, "count": len(out), "items": out}
+                        return {
+                            "ok": True, "count": len(out), "items": out,
+                            "engine_ready": demands_ready,
+                            "note": engine_note,
+                        }
 
-    return {"ok": True, "count": len(out), "items": out}
+    return {
+        "ok": True, "count": len(out), "items": out,
+        "engine_ready": demands_ready,
+        "note": engine_note,
+    }
 
 
 class _DefaultPersona:

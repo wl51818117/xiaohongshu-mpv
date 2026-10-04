@@ -389,3 +389,66 @@ class Inquiry(Base):
     created_at: Mapped[datetime] = mapped_column(
         DateTime, server_default=func.now(), index=True
     )
+
+
+class DemandSignal(Base):
+    """需求信号（带证据）—— 2026-10 新增。
+
+    ★ 为什么必须独立成表，而不是塞进 Persona.concerns 的 JSON：
+      原来的 `concerns: JSON` 没有来源、没有证据、没法验证，
+      只能靠 AI 拍脑袋填（实测三个 Persona 的 `own_words` 全是空的）。
+      **不可验证的痛点 = 伪需求**，会一路污染选题、写作、投放决策。
+
+    ★ 核心设计：
+      1. `verbatim`（用户原话）是**最值钱的字段**。
+         「穿了痒，洗了晒干才不痒」比「用户对材质敏感」信息量高一个量级——
+         症状才能指向解法，结论不能。
+      2. `source` + `source_ref` 让每条需求**可复核**。没有可复核引用的需求
+         应该在 `verified=False` 状态下。
+      3. `evidence_count`（跨来源计数）≥3 才算**高置信度**，
+         选题引擎只用高置信度的。这是防「一篇爆文带偏模型」的机制。
+      4. `signal_type` 区分信号类型——
+         参数化追问（「160斤能穿吗」）的购买意向远高于泛泛的吐槽。
+
+    ★ 故意不设`confidence` 枚举字段：
+      置信度是**算出来的**（`evidence_count` 跨来源数），
+      让人手填就会拍脑袋。用 `verified` 只表示「人确认过这是真的」。
+    """
+
+    __tablename__ = "demand_signals"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    # ★ 用用户原话，不要改写成书面语
+    verbatim: Mapped[str] = mapped_column(Text, default="")
+    # 归一化后的痛点标签（便于聚合统计），如「材质糙」「码数不准」
+    topic: Mapped[str] = mapped_column(String(100), default="", index=True)
+    # signal_type: symptom 症状 / param 参数化追问 / objection 反对意见 / scene 场景
+    signal_type: Mapped[str] = mapped_column(String(20), default="symptom", index=True)
+    # 人群（对应 Persona.name）与场景
+    persona: Mapped[str] = mapped_column(String(100), default="", index=True)
+    scene: Mapped[str] = mapped_column(String(50), default="", index=True)
+    # 关联商品（可选，同一痛点不同商品的解法可能不同）
+    product_id: Mapped[int | None] = mapped_column(
+        ForeignKey("products.id", ondelete="SET NULL"), nullable=True
+    )
+
+    # ── 证据（缺一不可）──
+    # source: xiaohongshu_comment / xiaohongshu_search / ecommerce_review /
+    #         alibaba_inquiry / own_support / competitor_comment / manual
+    source: Mapped[str] = mapped_column(String(40), default="manual", index=True)
+    # 可复核的引用：笔记标题+日期 / 差评原文片段 / 询盘编号
+    source_ref: Mapped[str] = mapped_column(String(300), default="")
+    # 品牌（竞品差评类来源必填，便于做红黑榜）
+    brand: Mapped[str] = mapped_column(String(60), default="")
+    # 情绪强度：1 弱 / 2 中 / 3 强
+    intensity: Mapped[int] = mapped_column(Integer, default=1)
+
+    # 跨来源计数——**置信度的唯一依据**，由系统自动累加，不让人工填
+    evidence_count: Mapped[int] = mapped_column(Integer, default=1, index=True)
+    # verified: 人工确认过（来源真实、表述准确）
+    verified: Mapped[int] = mapped_column(Integer, default=0, index=True)
+    note: Mapped[str] = mapped_column(Text, default="")
+
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime, server_default=func.now(), index=True
+    )
