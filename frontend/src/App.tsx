@@ -25,6 +25,7 @@ import { FlowCanvas } from './components/FlowCanvas'
 import { PageScaffold } from './components/PageScaffold'
 import { DraftEditor } from './components/DraftEditor'
 import { AssetStudio } from './components/AssetStudio'
+import { AnalyticsBoard } from './components/AnalyticsBoard'
 import { buildStepStatus, stepsOf, type StepStatus } from './lib/flow'
 import { connectWorkbench, type ViewState, type WorkbenchOps } from './bridge/workbench-ops'
 
@@ -502,20 +503,12 @@ export default function App() {
             />
           )}
 
-          {/* ── 数据看板 ── */}
+          {/* ── 数据看板（已实现） ── */}
           {tab === 'analytics' && (
-            <PageScaffold
-              stage="P7"
-              title="数据看板"
-              desc="发布后复盘：1/3/7/14 天快照，爆文要素回流选题"
-              plan={[
-                '指标看板：曝光、点击率、互动率、完播率、收藏率、涨粉',
-                '投流建议：薯条（点击率≥5% 且完读≥40%）、聚光（48h 赞藏≥100）',
-                '爆文要素拆解：标题公式、结构模板、封面类型',
-                '评论区高频提问 → 直接转为下一批选题',
-                '月度体检：内容配比 7:2:1、素材 15 天生命周期、标签重合度',
-                '同号防重复：相似度超 60% 会被判抄袭',
-              ]}
+            <AnalyticsBoard
+              draftId={currentDraft?.id ?? null}
+              onNotify={notify}
+              onChanged={refresh}
             />
           )}
 
