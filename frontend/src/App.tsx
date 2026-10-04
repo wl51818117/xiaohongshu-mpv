@@ -23,7 +23,7 @@ import { AgentChat } from './components/AgentChat'
 import { BREAKPOINT_NARROW, useMediaQuery } from './hooks/useMediaQuery'
 import { FlowCanvas } from './components/FlowCanvas'
 import { PageScaffold } from './components/PageScaffold'
-import { DraftEditor } from './components/DraftEditor'
+import { WritingDesk } from './components/WritingDesk'
 import { AssetStudio } from './components/AssetStudio'
 import { AnalyticsBoard } from './components/AnalyticsBoard'
 import { SettingsPanel } from './components/SettingsPanel'
@@ -98,6 +98,8 @@ export default function App() {
     () => localStorage.getItem('wb-sidebar-collapsed') === '1',
   )
   const [settingsOpen, setSettingsOpen] = useState(false)
+  // 当前写作的稿件 id（从选题库转稿件时确定）
+  const [activeDraftId, setActiveDraftId] = useState<number | null>(null)
   const [presetKey, setPresetKey] = useState<string>('')
 
   // 侧栏折叠状态持久化
@@ -168,6 +170,36 @@ export default function App() {
       disposed = true
     }
   }, [readView])
+
+
+  /** 从选题转稿件并进入写作台。
+   *
+   * 流程修正（王哥指出）：稿件不是独立页，必须从选题派生。
+   * 这里先调 /from-topic 拿到带上下文的稿件，再跳转。
+   */
+  const startDraftFromTopic = async (topic: Topic) => {
+    setBusy(`draft-${topic.id}`)
+    try {
+      const r = await fetch('/api/drafts/from-topic', {
+        method: 'POST',
+        headers: { 'content-type': 'application/json' },
+        body: JSON.stringify({ topic_id: topic.id }),
+      }).then((x) => x.json())
+      if (!r.ok && r.detail) {
+        notify('err', typeof r.detail === 'string' ? r.detail : '转稿件失败')
+        return
+      }
+      setSelectedTopicId(topic.id)
+      setActiveDraftId(r.draft_id)
+      setTab('draft')
+      notify('ok', r.created ? `已创建稿件 #${r.draft_id}` : `打开已有稿件 #${r.draft_id}`)
+      void refresh()
+    } catch (e) {
+      notify('err', `转稿件失败：${(e as Error).message}`)
+    } finally {
+      setBusy(null)
+    }
+  }
 
   const refresh = useCallback(async () => {
     try {
@@ -588,23 +620,17 @@ export default function App() {
             </>
           )}
 
-          {/* ── 稿件页 ── */}
+          {/* ── 稿件页：选题写作台（必须从选题库进入） ── */}
           {tab === 'draft' && (
-            <>
-              <SectionTitle
-                title="稿件"
-                desc="文案编辑：初稿 → 去 AI 味 → 合规校验 → 人工定稿"
-              />
-              <DraftEditor
-                topics={topics}
-                selectedTopicId={selectedTopicId}
-                onNotify={notify}
-                onChanged={refresh}
-              />
-            </>
+            <WritingDesk
+              topicId={selectedTopicId}
+              draftId={activeDraftId}
+              onNotify={notify}
+              onChanged={refresh}
+              onBack={() => setTab('topics')}
+            />
           )}
 
-          {/* ── 素材工坊（已实现） ── */}
           {tab === 'assets' && (
             <AssetStudio
               draft={currentDraft}
@@ -731,13 +757,11 @@ export default function App() {
                           </div>
                         </div>
                         <button
-                          className="btn-ghost shrink-0 !px-2 !py-1 !text-xs"
-                          onClick={() => {
-                            setSelectedTopicId(t.id)
-                            setTab('draft')
-                          }}
+                          className="btn-primary shrink-0 !px-3 !py-1.5 !text-xs"
+                          disabled={busy !== null}
+                          onClick={() => void startDraftFromTopic(t)}
                         >
-                          写稿
+                          {busy === `draft-${t.id}` ? '转稿中…' : '写稿'}
                         </button>
                       </div>
                     </div>
