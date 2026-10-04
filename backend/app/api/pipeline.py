@@ -29,6 +29,9 @@ class FeedIn(BaseModel):
 class CollectRequest(BaseModel):
     feeds: list[FeedIn] | None = None
     limit_per_feed: int = Field(10, ge=1, le=50)
+    preset: str | None = Field(
+        None, description="赛道预设 key，见 GET /api/pipeline/feeds"
+    )
 
 
 class TopicOut(BaseModel):
@@ -70,9 +73,21 @@ def pipeline_status(db: Session = Depends(get_db)) -> dict:
     }
 
 
+@router.get("/pipeline/feeds", summary="赛道预设列表")
+def list_feeds() -> dict:
+    """返回可用的赛道预设，供前端下拉选择。
+
+    换赛道只需改 backend/data/feeds.json，不用动代码。
+    """
+    return {"presets": rss_collector.list_presets()}
+
+
 @router.post("/pipeline/collect", summary="环节一：RSS 采集入库")
 def collect_rss(req: CollectRequest, db: Session = Depends(get_db)) -> dict:
-    """从 RSS 源抓取资讯，去重后入库。"""
+    """从 RSS 源抓取资讯，去重后入库。
+
+    不传 feeds 时用 preset 指定的赛道源；都不传则用第一个预设。
+    """
     feeds = None
     if req.feeds:
         feeds = [
@@ -82,7 +97,10 @@ def collect_rss(req: CollectRequest, db: Session = Depends(get_db)) -> dict:
             for f in req.feeds
         ]
     result = rss_collector.collect_rss(
-        db, feeds=feeds, limit_per_feed=req.limit_per_feed
+        db,
+        feeds=feeds,
+        limit_per_feed=req.limit_per_feed,
+        preset=req.preset,
     )
     return {"ok": True, **result}
 

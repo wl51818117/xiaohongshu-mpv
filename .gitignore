@@ -22,8 +22,11 @@ dist-electron/
 *.sqlite
 *.sqlite3
 *.db-journal
-data/
+# data/ 下的运行时数据忽略，但**配置文件必须入库**
+#（feeds.json 是赛道配置，换赛道靠它；丢了就没法改了）
+data/*
 !data/.gitkeep
+!data/feeds.json
 volumes/
 *.log
 

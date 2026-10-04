@@ -11,16 +11,33 @@
 from __future__ import annotations
 
 import hashlib
+import json
 from dataclasses import dataclass
 from datetime import datetime
 from urllib.request import Request, urlopen
 
 import feedparser
 
+from app.core.config import settings
 from app.db.models import RawMaterial, SourceType
 
 # User-Agent：部分源会拒绝空 UA
 UA = "Mozilla/5.0 (compatible; WorkbenchBot/0.1; +https://local)"
+
+# RSS 源配置文件 —— 换赛道只改这个 json，不用改代码
+FEEDS_FILE = settings.data_dir / "feeds.json"
+
+# 文件缺失/损坏时的兜底，保证采集不因配置问题挂掉
+_FALLBACK_PRESETS = {
+    "tech": {
+        "label": "科技 / AI",
+        "desc": "数码工具、AI 应用",
+        "feeds": [
+            {"name": "InfoQ中文", "url": "https://www.infoq.cn/feed", "category": "技术"},
+            {"name": "36氪", "url": "https://36kr.com/feed", "category": "科技商业"},
+        ],
+    }
+}
 
 
 @dataclass
@@ -30,6 +47,46 @@ class FeedConfig:
     name: str
     url: str
     category: str = "综合"
+
+
+def load_presets() -> dict:
+    """读取 feeds.json 里的赛道预设。"""
+    try:
+        if not FEEDS_FILE.exists():
+            return _FALLBACK_PRESETS
+        with FEEDS_FILE.open(encoding="utf-8") as f:
+            data = json.load(f)
+        return data.get("presets") or _FALLBACK_PRESETS
+    except Exception as exc:  # noqa: BLE001
+        print(f"[rss] 读取 {FEEDS_FILE} 失败，用兜底配置: {exc}")
+        return _FALLBACK_PRESETS
+
+
+def list_presets() -> list[dict]:
+    """列出所有赛道预设（供前端下拉选择）。"""
+    return [
+        {
+            "key": key,
+            "label": conf.get("label", key),
+            "desc": conf.get("desc", ""),
+            "count": len(conf.get("feeds", [])),
+        }
+        for key, conf in load_presets().items()
+    ]
+
+
+def feeds_of_preset(preset_key: str) -> list[FeedConfig]:
+    """取某个预设的源列表。"""
+    conf = load_presets().get(preset_key) or {}
+    return [
+        FeedConfig(
+            name=f.get("name", "未命名"),
+            url=f.get("url", ""),
+            category=f.get("category", "综合"),
+        )
+        for f in conf.get("feeds", [])
+        if f.get("url")
+    ]
 
 
 # 默认源清单：可按赛道调整（docs/08 待确认项 #2）
@@ -120,17 +177,29 @@ def collect_rss(
     db,
     feeds: list[FeedConfig] | None = None,
     limit_per_feed: int = 10,
+    preset: str | None = None,
 ) -> dict:
     """批量采集并入库（去重）。
 
-    返回统计：抓取条目数、新增数、重复数、各源状态。
+    参数：
+      feeds  显式指定的源；不给则用 preset
+      preset 赛道预设 key（见 feeds.json）；都不给则用第一个预设
     """
-    feeds = feeds or DEFAULT_FEEDS
+    if feeds is None and preset:
+        feeds = feeds_of_preset(preset)
+    if not feeds:
+        # 兜底：取第一个预设
+        presets = load_presets()
+        if presets:
+            first = next(iter(presets))
+            feeds = feeds_of_preset(first)
+            preset = preset or first
+
     added = 0
     duplicated = 0
     per_feed: list[dict] = []
 
-    for feed in feeds:
+    for feed in feeds or []:
         items = fetch_feed(feed, limit=limit_per_feed)
         feed_added = 0
         for item in items:
@@ -152,6 +221,7 @@ def collect_rss(
         print(f"[rss] {feed.name}: 抓取 {len(items)} 条，新增 {feed_added} 条")
 
     return {
+        "preset": preset,
         "fetched": added + duplicated,
         "added": added,
         "duplicated": duplicated,
