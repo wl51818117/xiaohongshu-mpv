@@ -178,3 +178,98 @@ def list_materials(
 @router.get("/health", summary="健康检查")
 def health() -> dict:
     return {"ok": True}
+
+
+# ══════════════════════════════════════════════════════════════
+# 选题管理：删除 + 从素材直接转选题
+# ══════════════════════════════════════════════════════════════
+
+class MaterialToTopicIn(BaseModel):
+    """从素材直接建选题（用户在素材库点「加入选题」时用）。"""
+
+    material_id: int
+    title: str = Field("", description="自定义选题标题，留空则用素材原标题")
+    keyword: str = Field("", description="目标长尾词，留空则自动抽取")
+    persona: str = ""
+    value_type: str = "实用"
+
+
+@router.post("/materials/{material_id}/to-topic", summary="素材直接转选题")
+def material_to_topic(
+    material_id: int,
+    payload: MaterialToTopicIn,
+    db: Session = Depends(get_db),
+) -> dict:
+    """把一条素材转成选题。
+
+    素材库里的内容默认只是「待转换」，用户也可以主动挑一条直接建选题。
+    """
+    from app.db.models import RawMaterial
+    from app.services import topic_converter
+
+    mat = db.get(RawMaterial, material_id)
+    if not mat:
+        raise HTTPException(status_code=404, detail="素材不存在")
+
+    text = f"{mat.title} {mat.summary or ''}"
+
+    # 合规预检：违规素材不允许转选题
+    passed, hits = topic_converter.check_compliance(text)
+    if not passed:
+        raise HTTPException(
+            status_code=400,
+            detail=f"素材命中合规黑名单（{'、'.join(hits[:3])}），不能转选题",
+        )
+
+    title = (payload.title or "").strip() or mat.title
+    keyword = (payload.keyword or "").strip() or topic_converter.extract_keyword(
+        mat.title, mat.summary or ""
+    )
+
+    # 同一素材已有选题则不重复创建
+    existing = (
+        db.query(Topic)
+        .filter(Topic.title == title, Topic.keyword_target == keyword)
+        .first()
+    )
+    if existing:
+        return {"ok": True, "created": False, "id": existing.id, "title": existing.title}
+
+    t = Topic(
+        title=title[:500],
+        keyword_target=keyword[:200],
+        persona=(payload.persona or topic_converter.detect_persona(text) or "")[:200],
+        value_type=payload.value_type,
+        differentiation=topic_converter.build_differentiation(mat),
+        material_id=mat.id,
+        status=topic_converter.TopicStatus.POOLED,
+    )
+    db.add(t)
+    db.commit()
+    db.refresh(t)
+
+    return {
+        "ok": True,
+        "created": True,
+        "id": t.id,
+        "title": t.title,
+        "keyword": t.keyword_target,
+    }
+
+
+@router.delete("/topics/{topic_id}", summary="删除选题")
+def delete_topic(topic_id: int, db: Session = Depends(get_db)) -> dict:
+    """删除选题。若该选题已有稿件，一并删除稿件（避免孤儿数据）。"""
+    from app.db.models import Draft
+
+    t = db.get(Topic, topic_id)
+    if not t:
+        raise HTTPException(status_code=404, detail="选题不存在")
+
+    drafts = db.query(Draft).filter(Draft.topic_id == topic_id).all()
+    for d in drafts:
+        db.delete(d)
+    db.delete(t)
+    db.commit()
+
+    return {"ok": True, "deleted_topic": topic_id, "deleted_drafts": len(drafts)}

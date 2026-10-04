@@ -13,7 +13,7 @@ from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.staticfiles import StaticFiles
 
-from app.api import agent, agent_data, analytics, assets, bridge, drafts, feeds, pipeline, publish
+from app.api import agent, agent_data, ai, analytics, assets, bridge, drafts, feeds, pipeline, publish
 from app.api import settings as settings_api
 from app.core.config import settings
 from app.db.session import init_db
@@ -63,6 +63,8 @@ app.include_router(assets.router)
 app.include_router(analytics.router)
 # 发布队列：组装发布包 + 发布前自检（不代提交）
 app.include_router(publish.router)
+# AI 创作：标题批量生成 / 多轮打磨 / 标签推荐
+app.include_router(ai.router)
 # RSS 源管理：可视化增删改，避免手改 json
 app.include_router(feeds.router)
 # 系统设置：内核 API Key / 模型 / 界面偏好
