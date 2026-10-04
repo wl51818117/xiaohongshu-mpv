@@ -37,7 +37,12 @@ APP_ID = os.getenv("HARNESS_APP_ID", "workbench")
 _TICKET_SECRET = os.getenv("HARNESS_TICKET_SECRET", "")
 
 # 内核接受的静态凭据（appTokens 里给本工作台配的 token）
-_STATIC_TOKEN = os.getenv("HARNESS_APP_TOKEN", "")
+# 取值优先级：环境变量 HARNESS_APP_TOKEN -> settings.kernel_auth_headers（自动读内核 patch）
+# ★ 必须与 app.agent.kernel 用同一份凭据来源。之前这里只认环境变量、
+#   agent/kernel.py 又完全不带头，导致「bridge 显示可用、Agent 却 401」的分裂现象。
+_STATIC_TOKEN = os.getenv("HARNESS_APP_TOKEN", "") or settings.kernel_auth_headers.get(
+    "authorization", ""
+)[len("Bearer "):]
 
 
 def _auth_headers(ticket: str | None, client_id: str | None) -> dict[str, str]:

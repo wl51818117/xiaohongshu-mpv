@@ -3,6 +3,9 @@
 技术栈依据 docs/08-终极选型方案v4单账号版.md。
 """
 
+from __future__ import annotations
+
+import re
 from functools import lru_cache
 from pathlib import Path
 
@@ -33,6 +36,12 @@ class Settings(BaseSettings):
     # ── dsh 内核 ──
     kernel_base_url: str = "http://127.0.0.1:8787"
     kernel_timeout_seconds: int = 120
+    # 内核静态凭据。留空则自动从内核 profile 的 cordis.patch.yml 读
+    # （那是唯一真源，避免两处各存一份 token 后悄悄不一致）。
+    kernel_token: str = ""
+    kernel_app_id: str = "workbench"
+    # 内核 profile 的 patch 文件路径，用于自动取 token。
+    kernel_patch_file: str = ""
 
     # ── 内容规格（docs/02-内容规格与合规基线.md）──
     xhs_title_max_chars: int = 20
@@ -55,6 +64,44 @@ class Settings(BaseSettings):
         path = BACKEND_ROOT / "data"
         path.mkdir(parents=True, exist_ok=True)
         return path
+
+    @property
+    def kernel_auth_headers(self) -> dict[str, str]:
+        """内核请求所需的头。
+
+        hbridge v2.1 起 **所有** /v1/* 都要 `authorization: Bearer <token>`，
+        漏掉会得到 401（表现为「Agent 在线但一句话都不回」）。
+        token 优先取环境变量，取不到就从内核 profile 的 patch 文件里读——
+        那是唯一真源，避免两处各存一份后悄悄不一致。
+        """
+        headers: dict[str, str] = {}
+        token = self.kernel_token.strip() or _token_from_kernel_patch()
+        if token:
+            headers["authorization"] = f"Bearer {token}"
+        if self.kernel_app_id:
+            headers["x-harness-app"] = self.kernel_app_id
+        return headers
+
+
+def _token_from_kernel_patch() -> str:
+    """从内核 profile 的 cordis.patch.yml 取全局静态 token。
+
+    只认独立成行的 `token:` —— `appTokens:` 里也含 "token" 字样，
+    用宽松正则会先匹配到它，导致 401（这个坑踩过）。
+    """
+    raw = settings.kernel_patch_file.strip()
+    if not raw:
+        # 默认按 start-all.js 的约定路径推断
+        guess = Path(r"E:/Ai-workbuddy/提取harness/.dsh/profiles/kernel/cordis.patch.yml")
+        raw = str(guess) if guess.exists() else ""
+    if not raw or not Path(raw).exists():
+        return ""
+    try:
+        text = Path(raw).read_text(encoding="utf-8")
+    except OSError:
+        return ""
+    m = re.search(r"^[ \t]+token:[ \t]*['\"]([^'\"]+)['\"]", text, re.M)
+    return m.group(1) if m else ""
 
 
 @lru_cache
