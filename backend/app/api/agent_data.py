@@ -79,7 +79,7 @@ def create_topic(payload: TopicCreate, db: Session = Depends(get_db)) -> dict:
 
     # 若关联了素材，把理由写进素材的提炼字段，形成溯源链
     if payload.material_id and payload.rationale:
-        material = db.query(RawMaterial).get(payload.material_id)
+        material = db.get(RawMaterial, payload.material_id)
         if material:
             elements = dict(material.extracted_elements or {})
             elements.setdefault("agent_topics", []).append(
@@ -97,7 +97,7 @@ def create_topic(payload: TopicCreate, db: Session = Depends(get_db)) -> dict:
 @router.patch("/topics", summary="Agent 更新选题")
 def update_topic(payload: TopicUpdate, db: Session = Depends(get_db)) -> dict:
     """内核工具调用此接口，更新选题状态或关键词。"""
-    topic = db.query(Topic).get(payload.id)
+    topic = db.get(Topic, payload.id)
     if not topic:
         raise HTTPException(status_code=404, detail="选题不存在")
 

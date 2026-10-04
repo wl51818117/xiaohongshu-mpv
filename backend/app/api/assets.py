@@ -47,20 +47,39 @@ class ValidateRequest(BaseModel):
 
 
 @router.post("/generate", summary="生成封面或内页")
-def generate(req: GenerateRequest, db: Session = Depends(get_db)) -> dict:
+def generate(
+    req: GenerateRequest | None = None,
+    draft_id: int | None = None,
+    kind: str = "cover",
+    style: str = "realistic",
+    count: int = 6,
+    db: Session = Depends(get_db),
+) -> dict:
     """生成图片素材并写回稿件。
+
+    参数来源：优先 JSON body，其次 query —— 两者都支持，
+    方便从地址栏或 curl 快速触发。
 
     ★ 当前是本地占位实现（尺寸真实、内容待接 AI API），
       接真实生图只需替换 asset_generator._call_provider。
     """
-    draft = db.query(Draft).get(req.draft_id)
+    # 合并两种参数来源
+    if req is not None:
+        draft_id = req.draft_id
+        kind = req.kind
+        style = req.style
+        count = req.count
+    if not draft_id:
+        raise HTTPException(status_code=400, detail="缺少 draft_id")
+
+    draft = db.get(Draft, draft_id)
     if not draft:
         raise HTTPException(status_code=404, detail="稿件不存在")
 
     title = draft.title or (draft.topic.title if draft.topic else "未命名")
 
-    if req.kind == "cover":
-        r = ag.generate_cover(req.draft_id, title, req.style)
+    if kind == "cover":
+        r = ag.generate_cover(draft_id, title, style)
         if r.ok and r.files:
             # 首个作为当前封面，其余留作备选（存images 前位）
             draft.cover_url = r.files[0]
@@ -72,7 +91,7 @@ def generate(req: GenerateRequest, db: Session = Depends(get_db)) -> dict:
             "validation": ag.validate_asset(r.files[0]) if r.files else None,
         }
 
-    r = ag.generate_inner(req.draft_id, title, req.count)
+    r = ag.generate_inner(draft_id, title, count)
     if r.ok and r.files:
         # 内页追加（封面保持在首位）
         existing = list(draft.images or [])
@@ -94,7 +113,7 @@ def gen_video(req: VideoRequest, db: Session = Depends(get_db)) -> dict:
     ★ 必须图生视频：文生视频画面不可控，保证不了与商品一致，电商不可用。
     当前返回运镜提示词 + 待接入说明（真实生视频需接 Seedance 等 API）。
     """
-    draft = db.query(Draft).get(req.draft_id)
+    draft = db.get(Draft, req.draft_id)
     if not draft:
         raise HTTPException(status_code=404, detail="稿件不存在")
 
@@ -123,7 +142,7 @@ def gen_video(req: VideoRequest, db: Session = Depends(get_db)) -> dict:
 @router.post("/compose", summary="ffmpeg 合成视频")
 def compose(req: ComposeRequest, db: Session = Depends(get_db)) -> dict:
     """把多个片段拼成一条完整视频（统一 3:4 / 30fps）。"""
-    draft = db.query(Draft).get(req.draft_id)
+    draft = db.get(Draft, req.draft_id)
     if not draft:
         raise HTTPException(status_code=404, detail="稿件不存在")
 

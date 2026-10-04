@@ -81,7 +81,7 @@ def get_metrics(draft_id: int, db: Session = Depends(get_db)) -> dict:
     """返回该稿件的快照序列与派生指标。"""
     from app.db.models import Draft
 
-    d = db.query(Draft).get(draft_id)
+    d = db.get(Draft, draft_id)
     if not d:
         raise HTTPException(status_code=404, detail="稿件不存在")
     v = d.validation or {}

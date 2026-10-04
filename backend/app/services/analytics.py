@@ -149,7 +149,7 @@ def record_snapshot(
     db: Session, draft_id: int, metrics: MetricsInput
 ) -> dict[str, Any]:
     """记录一次数据快照（发布后 1/3/7/14 天）。"""
-    draft = db.query(Draft).get(draft_id)
+    draft = db.get(Draft, draft_id)
     if not draft:
         raise ValueError(f"稿件不存在：{draft_id}")
 

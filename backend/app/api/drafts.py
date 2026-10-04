@@ -57,8 +57,9 @@ class ValidateRequest(BaseModel):
 def create_draft(payload: DraftCreate, db: Session = Depends(get_db)) -> dict:
     """创建稿件并自动跑一次校验。"""
     keyword = ""
+    topic = None
     if payload.topic_id:
-        topic = db.query(Topic).get(payload.topic_id)
+        topic = db.get(Topic, payload.topic_id)
         if topic:
             keyword = topic.keyword_target or ""
             # 占用选题，推进状态
@@ -77,6 +78,12 @@ def create_draft(payload: DraftCreate, db: Session = Depends(get_db)) -> dict:
         ai_declaration=declaration,
         pipeline_type=payload.pipeline_type,
     )
+
+    # ★ 选题状态联动：校验通过即视为「已成稿」。
+    #   之前只推进到 claimed 就停了，导致选题永远停在「建稿中」，
+    #   可执行选题数被虚假占用、流程图进度也不准。
+    if topic is not None and validation["passed"]:
+        topic.status = TopicStatus.DONE
 
     draft = Draft(
         topic_id=payload.topic_id,
@@ -124,7 +131,7 @@ def list_drafts(
 @router.get("/{draft_id}", summary="稿件详情")
 def get_draft(draft_id: int, db: Session = Depends(get_db)) -> dict:
     """获取单篇稿件全文。"""
-    d = db.query(Draft).get(draft_id)
+    d = db.get(Draft, draft_id)
     if not d:
         raise HTTPException(status_code=404, detail="稿件不存在")
     return {
@@ -146,7 +153,7 @@ def get_draft(draft_id: int, db: Session = Depends(get_db)) -> dict:
 @router.patch("", summary="更新稿件")
 def update_draft(payload: DraftUpdate, db: Session = Depends(get_db)) -> dict:
     """更新稿件内容并重跑校验。"""
-    d = db.query(Draft).get(payload.id)
+    d = db.get(Draft, payload.id)
     if not d:
         raise HTTPException(status_code=404, detail="稿件不存在")
 
@@ -175,6 +182,14 @@ def update_draft(payload: DraftUpdate, db: Session = Depends(get_db)) -> dict:
         pipeline_type=d.pipeline_type,
     )
 
+    # ★ 选题状态联动：校验通过 → done；改回不通过 → 退回 claimed。
+    #   否则「越改越糟」的稿件仍显示已成型，会误导选题决策。
+    if d.topic is not None:
+        if d.validation["passed"]:
+            d.topic.status = TopicStatus.DONE
+        elif d.topic.status == TopicStatus.DONE:
+            d.topic.status = TopicStatus.CLAIMED
+
     db.commit()
     db.refresh(d)
     return {"ok": True, "id": d.id, "validation": d.validation}
@@ -183,7 +198,7 @@ def update_draft(payload: DraftUpdate, db: Session = Depends(get_db)) -> dict:
 @router.delete("/{draft_id}", summary="删除稿件")
 def delete_draft(draft_id: int, db: Session = Depends(get_db)) -> dict:
     """删除稿件，并把选题退回可执行状态。"""
-    d = db.query(Draft).get(draft_id)
+    d = db.get(Draft, draft_id)
     if not d:
         raise HTTPException(status_code=404, detail="稿件不存在")
 
