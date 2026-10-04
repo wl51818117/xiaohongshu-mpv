@@ -1,0 +1,70 @@
+# ── Python ─────────────────────────────────────────────
+__pycache__/
+*.py[cod]
+*.egg-info/
+.venv/
+venv/
+env/
+.python-version
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+
+# ── Node ───────────────────────────────────────────────
+node_modules/
+dist/
+dist-electron/
+.vite/
+*.tsbuildinfo
+
+# ── 数据库与数据卷 ──────────────────────────────────────
+*.db
+*.sqlite
+*.sqlite3
+*.db-journal
+data/
+!data/.gitkeep
+volumes/
+*.log
+
+# ── 环境变量与密钥（严禁入库）────────────────────────────
+.env
+.env.*
+!.env.example
+*.pem
+*.key
+credentials*.yaml
+secrets/
+
+# ── 上传与生成素材（体积大、可再生）─────────────────────
+uploads/
+generated/
+output/
+outputs/
+assets/generated/
+*.mp4
+*.mov
+*.webm
+
+# ── 第三方参考代码（只读，不入库）───────────────────────
+.reference/
+references/third-party/
+vendor/
+
+# ── 运行时与缓存 ────────────────────────────────────────
+.cache/
+tmp/
+temp/
+.playwright/
+ms-playwright/
+.DS_Store
+Thumbs.db
+
+# ── 编辑器与 IDE ───────────────────────────────────────
+.vscode/
+.idea/
+*.swp
+
+# ── 工作台内部记忆（本地运行态，不入库）──────────────────
+.workbuddy/memory/
+.workbuddy/tmp/
