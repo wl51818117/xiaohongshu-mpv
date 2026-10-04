@@ -7,6 +7,7 @@ import {
   type KernelStatus,
   type Material,
   type PipelineStatus,
+  type Draft,
   type Topic,
 } from './lib/api'
 import {
@@ -23,6 +24,7 @@ import { BREAKPOINT_NARROW, useMediaQuery } from './hooks/useMediaQuery'
 import { FlowCanvas } from './components/FlowCanvas'
 import { PageScaffold } from './components/PageScaffold'
 import { DraftEditor } from './components/DraftEditor'
+import { AssetStudio } from './components/AssetStudio'
 import { buildStepStatus, stepsOf, type StepStatus } from './lib/flow'
 import { connectWorkbench, type ViewState, type WorkbenchOps } from './bridge/workbench-ops'
 
@@ -88,6 +90,7 @@ export default function App() {
   }>({})
   const [selectedTopicId, setSelectedTopicId] = useState<number | null>(null)
   const [presets, setPresets] = useState<FeedPreset[]>([])
+  const [currentDraft, setCurrentDraft] = useState<Draft | null>(null)
   const [presetKey, setPresetKey] = useState<string>('')
 
   // 窄屏时默认收起，避免一进来就被浮层挡住主内容
@@ -168,6 +171,11 @@ export default function App() {
       setTopics(t.items)
       setMaterials(m.items)
       setDraftStat(d.total ?? 0)
+      // 取最近一篇稿件供素材工坊使用
+      const dl = await fetch('/api/drafts?limit=1').then((x) => x.json()).catch(() => null)
+      if (dl?.items?.length) {
+        setCurrentDraft(await fetch(`/api/drafts/${dl.items[0].id}`).then((x) => x.json()).catch(() => null))
+      }
     } catch (e) {
       setToast({ kind: 'err', msg: `加载失败：${(e as Error).message}` })
     }
@@ -468,22 +476,12 @@ export default function App() {
             </>
           )}
 
-          {/* ── 素材工坊 ── */}
+          {/* ── 素材工坊（已实现） ── */}
           {tab === 'assets' && (
-            <PageScaffold
-              stage="P4"
-              title="素材工坊"
-              desc="图片与视频素材生产：封面、内页、分镜图、视频"
-              plan={[
-                'AI 生图：封面 3:4（1080×1440）出 3 个候选供挑选',
-                'AI 生图：内页 4-8 张，九宫格顺序（全景→细节→场景→价格）',
-                'HTML 卡片渲染：干货合集图、数据图表（版式精确可控）',
-                '角色一致性：参考图方案（同一模特/形象跨图复用）',
-                'AI 图生视频：分镜首帧 → 逐镜生成（必用图生视频）',
-                'ffmpeg 合成：拼接 + 字幕烧录（避让底部 15%）+ BGM',
-                '规格校验：分辨率/码率/时长/前 3秒钩子/无水印',
-                '素材生命周期提醒（AI 素材仅约 15 天，需换新）',
-              ]}
+            <AssetStudio
+              draft={currentDraft}
+              onChanged={refresh}
+              onNotify={notify}
             />
           )}
 
