@@ -27,10 +27,20 @@ import { WritingDesk } from './components/WritingDesk'
 import { AssetStudio } from './components/AssetStudio'
 import { AnalyticsBoard } from './components/AnalyticsBoard'
 import { SettingsPanel } from './components/SettingsPanel'
+import { AgentPanels } from './components/AgentPanels'
 import { buildStepStatus, stepsOf, type StepStatus } from './lib/flow'
 import { connectWorkbench, type ViewState, type WorkbenchOps } from './bridge/workbench-ops'
 
-type Tab = 'flow' | 'pipeline' | 'materials' | 'topics' | 'draft' | 'assets' | 'publish' | 'analytics'
+type Tab =
+  | 'flow'
+  | 'pipeline'
+  | 'materials'
+  | 'topics'
+  | 'draft'
+  | 'assets'
+  | 'publish'
+  | 'analytics'
+  | 'dynamic'
 
 /**
  * 导航顺序 = 内容生产顺序：
@@ -46,6 +56,7 @@ const TABS: { key: Tab; label: string; hint: string }[] = [
   { key: 'assets', label: '素材工坊', hint: '图片 / 视频' },
   { key: 'publish', label: '发布队列', hint: '半自动发布' },
   { key: 'analytics', label: '数据看板', hint: '复盘与爆文复用' },
+  { key: 'dynamic', label: '自定义面板', hint: 'Agent 动态创建' },
 ]
 
 export default function App() {
@@ -100,6 +111,8 @@ export default function App() {
   const [settingsOpen, setSettingsOpen] = useState(false)
   // 当前写作的稿件 id（从选题库转稿件时确定）
   const [activeDraftId, setActiveDraftId] = useState<number | null>(null)
+  // Agent 动态面板的当前 id
+  const [panelTarget, setPanelTarget] = useState<string | null>(null)
   const [presetKey, setPresetKey] = useState<string>('')
 
   // 侧栏折叠状态持久化
@@ -153,6 +166,17 @@ export default function App() {
       openAgent: () => {
         if (!disposed) setAgentOpen(true)
       },
+      // 元能力需要的回调
+      openPanel: (id: string) => {
+        if (!disposed) {
+          setPanelTarget(id)
+          setTab('dynamic')
+        }
+      },
+      refresh: () => {
+        if (!disposed) void refresh()
+      },
+      tabs: TABS.map((t) => ({ key: t.key, label: t.label })),
       readView,
     }
 
@@ -629,6 +653,11 @@ export default function App() {
               onChanged={refresh}
               onBack={() => setTab('topics')}
             />
+          )}
+
+          {/* ── Agent 动态面板 ── */}
+          {tab === 'dynamic' && (
+            <AgentPanels current={panelTarget} onOpen={setPanelTarget} />
           )}
 
           {tab === 'assets' && (

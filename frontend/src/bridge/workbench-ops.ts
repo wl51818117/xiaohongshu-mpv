@@ -12,12 +12,19 @@
  *  - 任何破坏性动作都必须人工确认
  */
 
-import type { HarnessBridge } from './harness-bridge'
+import type { Bridge, HarnessBridge } from './harness-bridge'
+import { defineMetaCapabilities } from './extensibility'
 
 /** 工作台暴露给 Agent 的操作集合 */
 export type WorkbenchOps = {
   /** 切换页签 */
   gotoTab: (tab: string) => void
+  /** 打开 Agent 动态建的面板 */
+  openPanel: (panelId: string) => void
+  /** 刷新工作台数据 */
+  refresh: () => void
+  /** 当前可用页签（喂给模型做枚举约束） */
+  tabs: { key: string; label: string }[]
   /** 设置选题筛选 */
   setTopicFilter: (filter: { status?: string; keyword?: string }) => void
   /** 选中某条选题 */
@@ -227,6 +234,21 @@ export async function connectWorkbench(
       handler: async () => ops.readView(),
     }),
   ]
+
+  // ── ★ 元能力层：让 Agent 能自己「改」工作台 ──────────
+  // 这些是积木 —— Agent 用它们盖房子（动态建面板、读写数据、切页），
+  // 不需要我们改代码重新构建。这是hbridge 的核心用法。
+  capabilities.push(
+    ...defineMetaCapabilities(
+      { ...(api as unknown as object) } as Bridge,
+      {
+        goto: ops.gotoTab,
+        openPanel: ops.openPanel,
+        refresh: ops.refresh,
+        tabs: ops.tabs,
+      },
+    ),
+  )
 
   // ── 接入 ───────────────────────────────────────────
   const bridge = await api.connect({
