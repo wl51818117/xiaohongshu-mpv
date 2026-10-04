@@ -18,14 +18,14 @@ import {
   ValueTypeBadge,
 } from './components/ui'
 import { AgentChat } from './components/AgentChat'
+import { BREAKPOINT_NARROW, useMediaQuery } from './hooks/useMediaQuery'
 
-type Tab = 'topics' | 'materials' | 'pipeline' | 'agent'
+type Tab = 'topics' | 'materials' | 'pipeline'
 
 const TABS: { key: Tab; label: string; hint: string }[] = [
   { key: 'topics', label: '选题库', hint: '可执行选题' },
   { key: 'materials', label: '素材库', hint: '原始资讯' },
   { key: 'pipeline', label: '流水线', hint: '采集与转换' },
-  { key: 'agent', label: 'Agent', hint: '内核对话' },
 ]
 
 export default function App() {
@@ -36,6 +36,17 @@ export default function App() {
   const [materials, setMaterials] = useState<Material[]>([])
   const [busy, setBusy] = useState<string | null>(null)
   const [toast, setToast] = useState<{ kind: 'ok' | 'err'; msg: string } | null>(null)
+
+  // ── Agent 侧栏状态 ──
+  // 桌面端：展开时占固定宽度（380px），与主内容区并列
+  // 窄屏端：降级为浮层，默认收起，避免遮挡主内容
+  const isNarrow = useMediaQuery(BREAKPOINT_NARROW)
+  const [agentOpen, setAgentOpen] = useState(false)
+
+  // 窄屏时默认收起，避免一进来就被浮层挡住主内容
+  useEffect(() => {
+    if (isNarrow) setAgentOpen(false)
+  }, [isNarrow])
 
   const refresh = useCallback(async () => {
     try {
@@ -118,9 +129,13 @@ export default function App() {
   }
 
   return (
-    <div className="flex h-full">
-      {/* ── 侧边栏 ── */}
-      <aside className="flex w-56 shrink-0 flex-col border-r border-stone-200 bg-white">
+    <div className="relative flex h-full overflow-hidden">
+      {/* ── 左侧导航（窄屏隐藏，让位给主内容） ── */}
+      <aside
+        className={`${
+          isNarrow ? 'hidden' : 'flex'
+        } w-56 shrink-0 flex-col border-r border-stone-200 bg-white`}
+      >
         <div className="border-b border-stone-200 px-5 py-4">
           <div className="text-sm font-semibold text-stone-900">电商工作台</div>
           <div className="mt-0.5 text-xs text-stone-400">
@@ -140,13 +155,7 @@ export default function App() {
               }`}
             >
               <div className="text-sm font-medium">{t.label}</div>
-              <div
-                className={`text-xs ${
-                  tab === t.key ? 'text-stone-400' : 'text-stone-400'
-                }`}
-              >
-                {t.hint}
-              </div>
+              <div className="text-xs text-stone-400">{t.hint}</div>
             </button>
           ))}
         </nav>
@@ -161,11 +170,40 @@ export default function App() {
         </div>
       </aside>
 
-      {/* ── 主区 ── */}
-      <main className="flex-1 overflow-y-auto">
+      {/* ── 中间主内容区（flex-1，Agent 展开也不被挤压） ── */}
+      <main className="min-w-0 flex-1 overflow-y-auto">
+        {/* 窄屏顶栏：显示当前页 + Agent 入口 */}
+        {isNarrow && (
+          <div className="sticky top-0 z-10 flex items-center justify-between border-b border-stone-200 bg-white/95 px-4 py-3 backdrop-blur">
+            <div>
+              <div className="text-sm font-semibold text-stone-900">
+                {TABS.find((t) => t.key === tab)?.label}
+              </div>
+              <div className="text-xs text-stone-400">
+                {TABS.find((t) => t.key === tab)?.hint}
+              </div>
+            </div>
+            <button
+              className="btn-ghost !px-2.5 !py-1.5"
+              onClick={() => setAgentOpen(true)}
+              aria-label="打开 Agent"
+            >
+              <svg width="15" height="15" viewBox="0 0 16 16" fill="none">
+                <path
+                  d="M8 2.5C4.75 2.5 2.5 4.4 2.5 6.9c0 1.5.8 2.85 2.1 3.7l-.4 2.2 2.4-1.4c.47.08.95.12 1.4.12 3.25 0 5.5-1.9 5.5-4.62S11.25 2.5 8 2.5Z"
+                  stroke="currentColor"
+                  strokeWidth="1.3"
+                  strokeLinejoin="round"
+                />
+              </svg>
+              Agent
+            </button>
+          </div>
+        )}
+
         <div className="mx-auto max-w-5xl px-8 py-6">
           {/* 状态概览 */}
-          {status && tab !== 'agent' && (
+          {status && (
             <div className="mb-6 grid grid-cols-4 gap-3">
               <StatCard label="素材" value={status.materials} />
               <StatCard label="选题" value={status.topics} tone="accent" />
@@ -392,22 +430,75 @@ export default function App() {
               )}
             </>
           )}
-
-          {tab === 'agent' && (
-            <>
-              <SectionTitle
-                title="Agent 对话"
-                desc="经后端转发到 dsh 内核，绝不浏览器直连"
-              />
-              <AgentChat online={kernel?.ok ?? false} onNotify={notify} />
-            </>
-          )}
         </div>
       </main>
 
-      {/* ── 提示条 ── */}
+      {/* ── Agent 侧栏 ──
+          桌面端（≥1024px）：与主内容区并列的固定列，不占用主内容宽度
+          窄屏（<1024px）：降级为右侧浮层 + 遮罩，不挤压主内容
+      */}
+      {!isNarrow && agentOpen && (
+        <aside className="w-[380px] shrink-0 animate-in border-l border-stone-200">
+          <AgentChat
+            online={kernel?.ok ?? false}
+            onNotify={notify}
+            onClose={() => setAgentOpen(false)}
+          />
+        </aside>
+      )}
+
+      {/* 窄屏浮层：全屏高度 + 遮罩，点击遮罩或关闭按钮退出 */}
+      {isNarrow && agentOpen && (
+        <>
+          <div
+            className="fixed inset-0 z-30 bg-stone-900/30"
+            onClick={() => setAgentOpen(false)}
+            aria-hidden
+          />
+          <aside
+            className="fixed inset-y-0 right-0 z-40 w-full max-w-[420px]
+                       animate-in border-l border-stone-200 shadow-xl"
+          >
+            <AgentChat
+              online={kernel?.ok ?? false}
+              onNotify={notify}
+              onClose={() => setAgentOpen(false)}
+            />
+          </aside>
+        </>
+      )}
+
+      {/* ── 收起态入口按钮（桌面端固定右下角） ── */}
+      {!isNarrow && !agentOpen && (
+        <button
+          onClick={() => setAgentOpen(true)}
+          aria-label="展开 Agent 侧栏"
+          className="fixed bottom-5 right-5 z-30 flex items-center gap-2 rounded-full
+                     bg-stone-900 px-4 py-2.5 text-sm font-medium text-white
+                     shadow-lg transition-colors hover:bg-stone-700"
+        >
+          <svg width="16" height="16" viewBox="0 0 16 16" fill="none">
+            <path
+              d="M8 2.5C4.75 2.5 2.5 4.4 2.5 6.9c0 1.5.8 2.85 2.1 3.7l-.4 2.2 2.4-1.4c.47.08.95.12 1.4.12 3.25 0 5.5-1.9 5.5-4.62S11.25 2.5 8 2.5Z"
+              stroke="currentColor"
+              strokeWidth="1.3"
+              strokeLinejoin="round"
+            />
+          </svg>
+          Agent
+          <span
+            className={`h-1.5 w-1.5 rounded-full ${
+              kernel?.ok ? 'bg-emerald-400' : 'bg-stone-500'
+            }`}
+          />
+        </button>
+      )}
+
+      {/* ── 提示条 ──
+          定位在主内容区中心：Agent 展开时不会互相遮挡
+      */}
       {toast && (
-        <div className="fixed bottom-5 left-1/2 z-50 -translate-x-1/2">
+        <div className="pointer-events-none fixed bottom-5 left-1/2 z-50 -translate-x-1/2">
           <div
             className={`animate-in max-w-lg rounded-lg px-4 py-2.5 text-sm shadow-lg ${
               toast.kind === 'ok'

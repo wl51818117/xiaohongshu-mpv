@@ -1,48 +1,57 @@
-import { useRef, useState } from 'react'
+import { useEffect, useRef, useState } from 'react'
 import { streamChat } from '../lib/api'
 
 type Msg = {
-  role: 'user' | 'assistant' | 'system'
+  role: 'user' | 'assistant'
   text: string
 }
 
-/** Agent 对话窗。
+/** Agent 对话侧栏。
  *
- * 铁律：绝不浏览器直连内核——这里只调后端 /api/agent/chat，
- * 由后端转发 SSE 并负责鉴权与限流。
+ * 布局约定：
+ *  - 高度 100%，由父容器（App 侧栏）决定，与页面等高
+ *  - 消息区 flex-1 + overflow-y-auto，内部独立滚动，不撑高页面
+ *  - 输入区固定在底部（shrink-0），不随消息滚动
+ *
+ * 安全铁律：绝不浏览器直连内核——只调后端 /api/agent/chat。
  */
 export function AgentChat({
   online,
   onNotify,
+  onClose,
 }: {
   online: boolean
   onNotify: (kind: 'ok' | 'err', msg: string) => void
+  onClose?: () => void
 }) {
   const [msgs, setMsgs] = useState<Msg[]>([])
   const [input, setInput] = useState('')
   const [busy, setBusy] = useState(false)
   const bufRef = useRef('')
+  const scrollRef = useRef<HTMLDivElement>(null)
+
+  // 新消息到达时滚到底
+  useEffect(() => {
+    const el = scrollRef.current
+    if (el) el.scrollTop = el.scrollHeight
+  }, [msgs, busy])
 
   const send = async () => {
     const text = input.trim()
     if (!text || busy) return
 
     setInput('')
-    setMsgs((m) => [...m, { role: 'user', text }])
+    setMsgs((m) => [...m, { role: 'user', text }, { role: 'assistant', text: '' }])
     setBusy(true)
     bufRef.current = ''
 
-    // 会话约定：note-{topicId}（docs/01）。此处用固定 demo 会话。
+    // 会话约定：note-{topicId}（docs/01）
     const sessionId = 'note-demo'
-
-    // 先插一个空的 assistant 气泡，边流边追加
-    setMsgs((m) => [...m, { role: 'assistant', text: '' }])
 
     try {
       await streamChat(text, sessionId, (event, data) => {
         if (event === 'text-delta') {
-          const d = data as { text?: string }
-          const chunk = d?.text ?? ''
+          const chunk = (data as { text?: string })?.text ?? ''
           if (!chunk) return
           bufRef.current += chunk
           const snapshot = bufRef.current
@@ -57,12 +66,10 @@ export function AgentChat({
             return next
           })
         } else if (event === 'error') {
-          const d = data as { message?: string }
-          onNotify('err', d?.message ?? '内核返回错误')
+          onNotify('err', (data as { message?: string })?.message ?? '内核返回错误')
         }
       })
 
-      // 若内核没吐任何文本，给个提示
       if (!bufRef.current) {
         setMsgs((m) => {
           const next = [...m]
@@ -87,24 +94,64 @@ export function AgentChat({
   }
 
   return (
-    <div className="card flex h-[calc(100vh-220px)] flex-col overflow-hidden">
-      {/* 消息区 */}
-      <div className="flex-1 space-y-3 overflow-y-auto p-4">
+    <div className="flex h-full min-h-0 flex-col bg-white">
+      {/* 侧栏头部 */}
+      <div className="flex shrink-0 items-center justify-between border-b border-stone-200 px-4 py-3">
+        <div className="flex items-center gap-2">
+          <span className="text-sm font-semibold text-stone-900">Agent</span>
+          <span
+            className={`h-1.5 w-1.5 rounded-full ${
+              online ? 'bg-emerald-500' : 'bg-stone-300'
+            }`}
+          />
+          <span className="text-xs text-stone-400">
+            {online ? '在线' : '离线'}
+          </span>
+        </div>
+        {onClose && (
+          <button
+            onClick={onClose}
+            aria-label="收起 Agent 侧栏"
+            className="rounded-md p-1 text-stone-400 transition-colors
+                       hover:bg-stone-100 hover:text-stone-700"
+          >
+            {/* 收起图标：右向箭头 */}
+            <svg width="16" height="16" viewBox="0 0 16 16" fill="none">
+              <path
+                d="M6 3.5L10.5 8L6 12.5"
+                stroke="currentColor"
+                strokeWidth="1.5"
+                strokeLinecap="round"
+                strokeLinejoin="round"
+              />
+            </svg>
+          </button>
+        )}
+      </div>
+
+      {/* 消息区：flex-1 + 独立滚动 */}
+      <div
+        ref={scrollRef}
+        className="min-h-0 flex-1 space-y-3 overflow-y-auto px-4 py-4"
+      >
         {msgs.length === 0 && (
-          <div className="py-10 text-center">
+          <div className="py-8 text-center">
             <div className="text-sm text-stone-500">问我任何关于内容运营的事</div>
-            <div className="mt-1 text-xs text-stone-400">
-              我会调用内核的工具来查选题、看素材
+            <div className="mt-1 text-xs leading-relaxed text-stone-400">
+              我会调用内核的工具
+              <br />
+              查选题、看素材
             </div>
           </div>
         )}
+
         {msgs.map((m, i) => (
           <div
             key={i}
             className={`flex ${m.role === 'user' ? 'justify-end' : 'justify-start'}`}
           >
             <div
-              className={`max-w-[80%] whitespace-pre-wrap rounded-2xl px-3.5 py-2 text-sm ${
+              className={`max-w-[85%] whitespace-pre-wrap rounded-2xl px-3 py-2 text-sm leading-relaxed ${
                 m.role === 'user'
                   ? 'bg-stone-900 text-white'
                   : 'border border-stone-200 bg-stone-50 text-stone-800'
@@ -114,34 +161,46 @@ export function AgentChat({
             </div>
           </div>
         ))}
+
         {busy && (
-          <div className="text-xs text-stone-400">
-            内核思考中…（首个响应可能需十几秒）
+          <div className="flex items-center gap-1.5 text-xs text-stone-400">
+            <span className="flex gap-0.5">
+              <span className="h-1 w-1 animate-bounce rounded-full bg-stone-400 [animation-delay:-0.3s]" />
+              <span className="h-1 w-1 animate-bounce rounded-full bg-stone-400 [animation-delay:-0.15s]" />
+              <span className="h-1 w-1 animate-bounce rounded-full bg-stone-400" />
+            </span>
+            内核思考中，首个响应可能需十几秒
           </div>
         )}
       </div>
 
-      {/* 输入区 */}
-      <div className="border-t border-stone-200 p-3">
+      {/* 输入区：固定底部，不参与滚动 */}
+      <div className="shrink-0 border-t border-stone-200 p-3">
         {!online && (
-          <div className="mb-2 rounded-lg bg-amber-50 px-3 py-2 text-xs text-amber-800">
-            内核未启动，对话不可用。到
-            <code>E:\Ai-workbuddy\提取harness</code> 双击 start-all.cmd 启动。
+          <div className="mb-2 rounded-lg bg-amber-50 px-2.5 py-1.5 text-xs leading-relaxed text-amber-800">
+            内核未启动。到
+            <code className="mx-1">提取harness</code>
+            目录双击 start-all.cmd。
           </div>
         )}
         <div className="flex gap-2">
           <input
             value={input}
             onChange={(e) => setInput(e.target.value)}
-            onKeyDown={(e) => e.key === 'Enter' && !e.shiftKey && void send()}
+            onKeyDown={(e) => {
+              if (e.key === 'Enter' && !e.shiftKey) {
+                e.preventDefault()
+                void send()
+              }
+            }}
             placeholder={online ? '输入问题，回车发送' : '内核离线'}
             disabled={!online || busy}
-            className="flex-1 rounded-lg border border-stone-300 px-3 py-2 text-sm
-                       outline-none placeholder:text-stone-400
+            className="min-w-0 flex-1 rounded-lg border border-stone-300 px-2.5 py-2
+                       text-sm outline-none placeholder:text-stone-400
                        focus:border-stone-500 disabled:bg-stone-50"
           />
           <button
-            className="btn-primary"
+            className="btn-primary shrink-0 !px-3"
             onClick={() => void send()}
             disabled={!online || busy || !input.trim()}
           >
