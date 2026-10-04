@@ -13,6 +13,8 @@ const TAG_TONES = {
   sky: 'bg-sky-50 text-sky-700 dark:bg-sky-500/15 dark:text-sky-300',
   rose: 'bg-rose-50 text-rose-700 dark:bg-rose-500/15 dark:text-rose-300',
   gray: 'bg-zinc-100 text-zinc-600 dark:bg-zinc-700/40 dark:text-zinc-300',
+  red: 'bg-red-50 text-red-700 dark:bg-red-500/15 dark:text-red-300',
+  orange: 'bg-orange-50 text-orange-700 dark:bg-orange-500/15 dark:text-orange-300',
 } as const
 
 export type TagTone = keyof typeof TAG_TONES
