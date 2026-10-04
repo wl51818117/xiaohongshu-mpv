@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useState } from 'react'
 import { SectionTitle, Tag } from './ui'
+import { FeedsManager } from './FeedsManager'
 
 type SettingsData = {
   kernel: {
@@ -42,6 +43,8 @@ export function SettingsPanel({
   })
   const [test, setTest] = useState<TestResult | null>(null)
   const [busy, setBusy] = useState<string | null>(null)
+  // 设置面板的标签页：内核 / RSS 源
+  const [tab, setTab] = useState<'kernel' | 'feeds'>('kernel')
 
   const load = useCallback(async () => {
     try {
@@ -150,8 +153,35 @@ export function SettingsPanel({
           </button>
         </div>
 
+        {/* 标签页 */}
+        <div className="flex shrink-0 gap-1 border-b border-[var(--border)] px-5">
+          {(
+            [
+              ['kernel', '内核与模型'],
+              ['feeds', 'RSS 源'],
+            ] as const
+          ).map(([k, label]) => (
+            <button
+              key={k}
+              onClick={() => setTab(k)}
+              className={`-mb-px border-b-2 px-3 py-2.5 text-sm font-medium transition-colors ${
+                tab === k
+                  ? 'border-orange-700 text-orange-700 dark:border-orange-400 dark:text-orange-400'
+                  : 'border-transparent text-stone-500 hover:text-stone-700'
+              }`}
+            >
+              {label}
+            </button>
+          ))}
+        </div>
+
         {/* 内容 */}
         <div className="min-h-0 flex-1 space-y-5 overflow-y-auto px-5 py-4">
+          {tab === 'feeds' ? (
+            <FeedsManager onNotify={onNotify} />
+          ) : (
+            <>
+          {/* 连接状态 */}
           {/* 连接状态 */}
           <div className="rounded-xl bg-zinc-50 p-3.5 dark:bg-zinc-800/60">
             <div className="mb-2 flex items-center justify-between">
@@ -287,6 +317,8 @@ export function SettingsPanel({
             4. 保存后需<strong>重启内核</strong>（
             <code>提取harness/start-all.cmd</code>）才会生效
           </div>
+            </>
+          )}
         </div>
 
         {/* 底部操作 */}
