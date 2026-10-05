@@ -28,6 +28,8 @@ import { WritingDesk } from './components/WritingDesk'
 import { AssetStudio } from './components/AssetStudio'
 import { AnalyticsBoard } from './components/AnalyticsBoard'
 import { KnowledgeBase } from './components/KnowledgeBase'
+import { DemandCollector } from './components/DemandCollector'
+import { CommerceDesk } from './components/CommerceDesk'
 import { SettingsPanel } from './components/SettingsPanel'
 import { AgentPanels } from './components/AgentPanels'
 import { buildStepStatus, stepsOf, STEPS } from './lib/flow'
@@ -43,6 +45,8 @@ type Tab =
   | 'publish'
   | 'analytics'
   | 'knowledge'
+  | 'demands'
+  | 'commerce'
   | 'dynamic'
 
 /**
@@ -52,6 +56,8 @@ type Tab =
  * → 知识库（经验沉淀与回顾）
  */
 const TABS: { key: Tab; label: string; hint: string }[] = [
+  { key: 'demands', label: '需求采集', hint: '用户原话与证据' },
+  { key: 'commerce', label: '获客台', hint: '咨询 / 商品 / 人群' },
   { key: 'flow', label: '流程图', hint: '图文 / 视频' },
   { key: 'pipeline', label: '流水线', hint: '采集与转换' },
   { key: 'materials', label: '素材库', hint: '原始资讯' },
@@ -795,6 +801,10 @@ export default function App() {
           )}
 
           {tab === 'knowledge' && <KnowledgeBase onNotify={notify} />}
+
+          {tab === 'demands' && <DemandCollector onNotify={notify} />}
+
+          {tab === 'commerce' && <CommerceDesk onNotify={notify} />}
 
           {tab === 'topics' && (
             <>
