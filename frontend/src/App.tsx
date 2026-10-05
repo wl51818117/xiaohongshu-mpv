@@ -23,6 +23,7 @@ import {
 import { AgentChat } from './components/AgentChat'
 import { BREAKPOINT_NARROW, useMediaQuery } from './hooks/useMediaQuery'
 import { MindMap } from './components/MindMap'
+import { Workbench } from './components/Workbench'
 import { PageScaffold } from './components/PageScaffold'
 import { WritingDesk } from './components/WritingDesk'
 import { AssetStudio } from './components/AssetStudio'
@@ -50,24 +51,37 @@ type Tab =
   | 'dynamic'
 
 /**
- * 导航顺序 = 内容生产顺序：
- * 流程图（总览）→ 流水线（采集）→ 素材库（原料）→ 选题库（选题）
- * → 稿件（文案）→ 素材工坊（图/视频）→ 发布队列→ 数据看板（复盘）
- * → 知识库（经验沉淀与回顾）
+ * ★ 导航收口（2026-10-05）：12 个平级页签 → 3 个主视图 + 设置抽屉
+ *
+ * 为什么要收：
+ *   调研 GitHub 上跑通的小红书工具（xiaohongshu-mcp 16k★只有 8 个工具、
+ *   RedInk 5.6k★ 交 15 张 PNG、wenzi 153★ 交一张定位卡），
+ *   **共同点是没有一个交「一个工作台」，交的都是文件或一个动作**。
+ *   12 个平级页签 = 12 个平行入口 = 用户不知道从哪开始。
+ *
+ * 现在的主路径（一个动词：把爆款变成可发布的稿子）：
+ *   工作台（贴链接→拆解→生成选题）→ 稿件（编辑→配图→发布）→ 复盘（看数据）
+ *
+ * 其余模块（需求采集/获客台/流程图/流水线/素材库/素材工坊/发布队列/数据看板/
+ * 知识库/自定义面板）**不删代码**，降级到「设置」抽屉里，
+ * 等主路径跑通了再决定去留。
  */
 const TABS: { key: Tab; label: string; hint: string }[] = [
-  { key: 'demands', label: '需求采集', hint: '用户原话与证据' },
-  { key: 'commerce', label: '获客台', hint: '咨询 / 商品 / 人群' },
-  { key: 'flow', label: '流程图', hint: '图文 / 视频' },
-  { key: 'pipeline', label: '流水线', hint: '采集与转换' },
-  { key: 'materials', label: '素材库', hint: '原始资讯' },
-  { key: 'topics', label: '选题库', hint: '可执行选题' },
-  { key: 'draft', label: '稿件', hint: '文案编辑' },
-  { key: 'assets', label: '素材工坊', hint: '图片 / 视频' },
-  { key: 'publish', label: '发布队列', hint: '半自动发布' },
-  { key: 'analytics', label: '数据看板', hint: '复盘与爆文复用' },
-  { key: 'knowledge', label: '知识库', hint: '踩坑与经验' },
-  { key: 'dynamic', label: '自定义面板', hint: 'Agent 动态创建' },
+  { key: 'topics', label: '工作台', hint: '爆款 → 选题' },
+  { key: 'draft', label: '稿件', hint: '编辑与发布' },
+  { key: 'analytics', label: '复盘', hint: '数据与复用' },
+]
+
+/** 收进设置抽屉的次级模块（功能未删除，只是不占主导航） */
+const SECONDARY: { key: Tab; label: string; desc: string }[] = [
+  { key: 'materials', label: '素材库', desc: '查看已采集的原始内容' },
+  { key: 'demands', label: '需求采集', desc: '录入用户原话与证据' },
+  { key: 'knowledge', label: '知识库', desc: '历史踩坑与经验' },
+  { key: 'assets', label: '素材工坊', desc: '封面与内页图' },
+  { key: 'publish', label: '发布队列', desc: '待发布的稿子' },
+  { key: 'commerce', label: '商品与咨询', desc: '商品主数据与客户咨询' },
+  { key: 'pipeline', label: '流水线', desc: 'RSS 批量采集' },
+  { key: 'flow', label: '流程图', desc: '全链路概览' },
 ]
 
 export default function App() {
@@ -122,6 +136,8 @@ export default function App() {
     () => localStorage.getItem('wb-sidebar-collapsed') === '1',
   )
   const [settingsOpen, setSettingsOpen] = useState(false)
+  // 次级模块抽屉是否展开（默认收起，主导航只留 3 个）
+  const [moreOpen, setMoreOpen] = useState(false)
   // 当前写作的稿件 id（从选题库转稿件时确定）
   const [activeDraftId, setActiveDraftId] = useState<number | null>(null)
   // Agent 动态面板的当前 id
@@ -500,6 +516,50 @@ export default function App() {
               </button>
             )
           })}
+
+          {/* 次级模块：收进抽屉，不占主导航。
+              ★ 这些功能**一个都没删**，只是从「平级入口」降为「二级入口」。
+                理由：先让主路径跑通验证，再决定哪些真需要砍。
+                万一某个功能是真需求，从这里能立刻找回来。*/}
+          {!sidebarCollapsed && (
+            <button
+              onClick={() => setMoreOpen((v) => !v)}
+              className="mt-1 flex items-center gap-2 rounded-lg px-3 py-1.5 text-[11px] text-white/50 transition-colors hover:bg-white/10 hover:text-white/80"
+            >
+              <span className="text-[10px]">{moreOpen ? '▾' : '▸'}</span>
+              <span>更多功能</span>
+              <span className="text-[10px] text-white/35">
+                {SECONDARY.filter((s) => tab === s.key).length > 0 && '· 当前'}
+              </span>
+            </button>
+          )}
+
+          {moreOpen && !sidebarCollapsed && (
+            <div className="mt-1 space-y-0.5 rounded-lg bg-black/15 px-2 py-1.5">
+              {SECONDARY.map((s) => {
+                const active = tab === s.key
+                return (
+                  <button
+                    key={s.key}
+                    onClick={() => {
+                      setTab(s.key)
+                      setMoreOpen(false)
+                    }}
+                    className={`block w-full rounded-md px-2 py-1.5 text-left text-[11px] transition-colors ${
+                      active
+                        ? 'bg-white/20 text-white'
+                        : 'text-white/55 hover:bg-white/10 hover:text-white/85'
+                    }`}
+                  >
+                    <span className="block font-medium">{s.label}</span>
+                    <span className="block truncate text-[10px] opacity-60">
+                      {s.desc}
+                    </span>
+                  </button>
+                )
+              })}
+            </div>
+          )}
         </nav>
 
         {/* 底部：状态 + 设置 + 折叠 */}
@@ -821,7 +881,19 @@ export default function App() {
 
           {tab === 'commerce' && <CommerceDesk onNotify={notify} />}
 
+          {/* ★ 工作台：唯一主入口。选题库原有的列表功能
+              收进「更多 → 素材库」旁，这里给主路径让位。 */}
           {tab === 'topics' && (
+            <Workbench
+              onNotify={notify}
+              onDraftCreated={(id) => {
+                setActiveDraftId(id)
+                setTab('draft')
+              }}
+            />
+          )}
+
+          {false && tab === 'topics' && (
             <>
               <SectionTitle
                 title="选题库"
