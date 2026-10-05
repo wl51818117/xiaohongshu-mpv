@@ -37,6 +37,10 @@ class SourceType(str, enum.Enum):
     RSS = "rss"          # RSS / 新闻源
     OWN_NOTE = "own_note"  # 自有账号爆款回采
     HOT_LIST = "hot_list"  # 全网热点聚合（后续阶段）
+    # ★ 浏览器扩展人工采集（2026-10-05）
+    #   区别于爬虫：**用户主动点击**才采集当前这一页，
+    #   复用用户自己的登录态，不批量、不绕过验证。
+    BROWSER = "browser"
 
 
 class TopicStatus(str, enum.Enum):

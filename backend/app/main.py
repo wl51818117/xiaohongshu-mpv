@@ -14,7 +14,8 @@ from fastapi.middleware.cors import CORSMiddleware
 from fastapi.staticfiles import StaticFiles
 
 from app.api import (agent, agent_data, ai, analytics, assets, bridge, commerce,
-                     demands, drafts, feeds, knowledge, pipeline, publish)
+                     browser_collect, demands, drafts, feeds, knowledge,
+                     pipeline, publish)
 from app.api import settings as settings_api
 from app.core.config import settings
 from app.db.session import init_db
@@ -89,6 +90,9 @@ app.include_router(commerce.router)
 
 # 需求采集（带证据）
 app.include_router(demands.router)
+
+# 浏览器扩展采集
+app.include_router(browser_collect.router)
 
 
 # ── 生成的素材静态服务（封面/内页/视频）────────────────────
