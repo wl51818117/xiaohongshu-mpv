@@ -29,6 +29,10 @@ export function AgentChat({
   const [busy, setBusy] = useState(false)
   const bufRef = useRef('')
   const scrollRef = useRef<HTMLDivElement>(null)
+  // 会话 id 用量：sessionStart 是「打开面板的时刻」，sessionSeq 逐轮递增。
+  // 组合起来保证「同一轮内稳定、跨轮唯一」。
+  const sessionStart = useRef(String(Date.now()))
+  const sessionSeq = useRef(0)
 
   // 新消息到达时滚到底
   useEffect(() => {
@@ -44,9 +48,23 @@ export function AgentChat({
     setMsgs((m) => [...m, { role: 'user', text }, { role: 'assistant', text: '' }])
     setBusy(true)
     bufRef.current = ''
+    sessionSeq.current += 1
 
-    // 会话约定：note-{topicId}（docs/01）
-    const sessionId = 'note-demo'
+    // ── 会话 id：每轮对话唯一 ──
+    // ★原来硬编码 'note-demo'，导致：
+    //   内核 dsh-session 的 create() 在同名 session 存在时直接抛错
+    //   （lib/index.js:1380 `session "x" already exists`），
+    //   于是第二次发消息就报「session already exists」。
+    //
+    // 为什么不用固定 id（断线续传的价值）：
+    //   这里每轮是独立问答，不是持续对话；复用同一 id 反而会
+    //   让上一轮的上下文污染这一轮。
+    //
+    // 为什么不用纯随机：
+    //   同一轮的重试/断线重连需要同一个 id 才能续上，
+    //   所以用「打开面板时的起始时间 + 递增序号」——
+    //   同一轮内保持稳定，新的一轮自动换新。
+    const sessionId = `chat-${sessionSeq.current}-${sessionStart.current}`
 
     // 收集本轮的真实错误原因。没拿到就只能在气泡里给一句空话，
     // 那等于让用户猜（踩过：401 被显示成「内核未返回文本」）。
