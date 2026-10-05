@@ -45,6 +45,17 @@ export type Material = {
   title: string
   own_flag: boolean
   has_topic: boolean
+  /** 内容摘要（原来后端没返回，导致「采集了但看不到内容」） */
+  summary?: string
+  /** 正文字数 */
+  body_len?: number
+  /** 封面图本地路径（浏览器采集时转存） */
+  cover_url?: string
+  author?: string
+  metrics?: Record<string, number>
+  topics?: string[]
+  originality_risk?: string
+  source_url?: string
 }
 
 export type FeedPreset = {

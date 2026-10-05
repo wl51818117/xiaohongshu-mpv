@@ -58,13 +58,66 @@ function pickAttr(selector, attr) {
 function pickFirstImgSrc(selectors) {
   for (const sel of selectors) {
     const el = document.querySelector(sel)
+    if (!el) continue
+
+    // ★ srcset 优先：常含多档清晰度，取最大的一档。
+    //   小红书/抖音的图是懒加载的，src 常是 base64 占位图（1x1透明），
+    //   真实地址在 data-src / srcset 上 —— 只读 src 就只能拿到占位图，
+    //   这正是「采集不到图」的原因。
+    const srcset =
+      el.getAttribute?.('srcset') || el.getAttribute?.('data-srcset') || ''
+    if (srcset) {
+      const best = srcset
+        .split(',')
+        .map((s) => s.trim().split(/\s+/))
+        .filter((p) => p[0] && !p[0].startsWith('data:'))
+        .sort((a, b) => {
+          const w = (p) => (p[1] && /w$/.test(p[1]) ? parseInt(p[1]) : 0)
+          return (w(b) || b[0].length) - (w(a) || a[0].length)
+        })[0]
+      if (best?.[0]) return best[0]
+    }
+
     const src =
-      el?.getAttribute?.('src') ||
-      el?.getAttribute?.('data-src') ||
-      (el?.tagName === 'IMG' ? el.src : '')
-    if (src && !src.startsWith('data:')) return src
+      el.getAttribute?.('data-src') ||
+      el.getAttribute?.('data-original') ||
+      el.getAttribute?.('src') ||
+      (el.tagName === 'IMG' ? el.src : '')
+    // 过滤 base64 占位图：长度很短的一定是占位
+    if (src && !src.startsWith('data:') && src.length > 40) return src
   }
   return ''
+}
+
+/** 兜底：找页面上**显示尺寸最大**的那张图。
+ *
+ * ★ 为什么需要：平台改版频繁，class 名一直在变，
+ *   靠选择器迟早失效。「渲染宽度最大的图」是**视觉事实**，
+ *   不依赖任何 class，比选择器稳得多。
+ */
+function pickLargestImage() {
+  let best = ''
+  let bestArea = 0
+  const imgs = document.querySelectorAll('img')
+  for (const img of imgs) {
+    const r = img.getBoundingClientRect?.()
+    const area = (r?.width || 0) * (r?.height || 0)
+    // 太小的是头像/图标；太大的是广告位，都不要
+    if (area < 8000 || area > 2000000) continue
+    const src =
+      img.getAttribute('srcset') ||
+      img.getAttribute('data-src') ||
+      img.getAttribute('src') ||
+      img.src ||
+      ''
+    const first = src.split(',')[0]?.trim().split(/\s+/)[0] || src
+    if (first.startsWith('data:')) continue
+    if (area > bestArea) {
+      bestArea = area
+      best = first
+    }
+  }
+  return best
 }
 
 /** 解析「1.2万」这类数字 */
@@ -107,12 +160,20 @@ function extract() {
     pickAttr('meta[property="og:image"]', 'content') ||
     pickAttr('meta[name="twitter:image"]', 'content') ||
     pickFirstImgSrc([
+      // 小红书：笔记大图（多个版本都试一遍，改版频繁）
       '.note-slider-img',
       '.swiper-slide img',
+      '.note-detail-img',
       '.player-container img',
       '.cover img',
-      'video[poster]',
+      '.img-container img',
+      '.media-container img',
+      '#noteContainer img',
+      'article img',
+      // 兜底：页面上尺寸最大的那张图（排除头像/图标）
+      '',
     ]) ||
+    pickLargestImage() ||
     ''
   if (cover && !cover.startsWith('http')) {
     cover = cover.startsWith('//') ? `https:${cover}` : new URL(cover, location.href).href

@@ -214,6 +214,16 @@ def list_materials(
                 "title": m.title,
                 "own_flag": bool(m.own_flag),
                 "has_topic": bool(m.topics),
+                # ★ 补上这些字段：原来只回标题+来源，导致
+                #   「采集了但看不到内容」——数据其实在库里，只是没返回。
+                "summary": (m.summary or "")[:300],
+                "body_len": len(m.raw_content or ""),
+                "cover_url": m.cover_url or "",
+                "author": m.author or "",
+                "metrics": m.metrics or {},
+                "topics": (m.extracted_elements or {}).get("topics", []),
+                "originality_risk": m.originality_risk or "low",
+                "source_url": m.source_url or "",
             }
             for m in rows
         ],

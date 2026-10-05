@@ -962,18 +962,82 @@ export default function App() {
                   {materials.map((m) => (
                     <div
                       key={m.id}
-                      className="card card-hover flex items-center gap-3 px-4 py-3"
+                      className="card card-hover flex gap-3 px-4 py-3"
                     >
+                      {/* 封面缩略图（浏览器采集会转存到本机） */}
+                      {m.cover_url && (
+                        <img
+                          src={`/files/${m.cover_url}`}
+                          alt=""
+                          className="h-16 w-12 shrink-0 rounded-[var(--r-sm)] object-cover"
+                          loading="lazy"
+                        />
+                      )}
                       <div className="min-w-0 flex-1">
-                        <div className="truncate text-sm text-stone-800">
+                        <div className="text-sm text-stone-800">
                           {m.title}
                         </div>
-                        <div className="mt-1 flex items-center gap-2 text-xs text-stone-400">
+
+                        {/* ★ 内容摘要：原来压根没返回，展示出来才知道采到了什么 */}
+                        {m.summary && (
+                          <p className="mt-1 line-clamp-2 text-[11px] leading-relaxed text-stone-500">
+                            {m.summary}
+                          </p>
+                        )}
+
+                        {/* 话题 */}
+                        {m.topics && m.topics.length > 0 && (
+                          <div className="mt-1.5 flex flex-wrap gap-1">
+                            {m.topics.slice(0, 5).map((t) => (
+                              <span
+                                key={t}
+                                className="rounded bg-brand-50 px-1.5 py-0.5 text-[10px] text-brand-700"
+                              >
+                                #{t}
+                              </span>
+                            ))}
+                          </div>
+                        )}
+
+                        <div className="mt-1.5 flex flex-wrap items-center gap-2 text-xs text-stone-400">
                           <span>{m.source_name}</span>
+                          {m.author && <span>@{m.author}</span>}
+                          {!!m.body_len && (
+                            <span className="text-emerald-600">
+                              正文 {m.body_len} 字
+                            </span>
+                          )}
+                          {/* 互动数：判断内容质量的第一手信号 */}
+                          {m.metrics && Object.keys(m.metrics).length > 0 && (
+                            <span className="text-stone-500">
+                              {m.metrics.likes != null && `赞${m.metrics.likes}`}
+                              {m.metrics.collects != null && ` · 藏${m.metrics.collects}`}
+                              {m.metrics.comments != null && ` · 评${m.metrics.comments}`}
+                            </span>
+                          )}
                           {m.own_flag && (
                             <span className="tag bg-emerald-50 text-emerald-700">
                               自有
                             </span>
+                          )}
+                          {/* 原创风险提示：浏览器采的是别人家内容 */}
+                          {m.originality_risk === 'high' && (
+                            <span
+                              className="tag bg-amber-50 text-amber-700"
+                              title="浏览器采集的他人内容，不可直接发布，需二次创作并加 AI 声明"
+                            >
+                              需二创
+                            </span>
+                          )}
+                          {m.source_url && (
+                            <a
+                              href={m.source_url}
+                              target="_blank"
+                              rel="noreferrer noopener"
+                              className="text-[10px] text-stone-400 underline-offset-2 hover:underline"
+                            >
+                              原链接
+                            </a>
                           )}
                         </div>
                       </div>
