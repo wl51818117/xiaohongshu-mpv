@@ -167,12 +167,26 @@ def _clean(text: str) -> str:
         if inner.startswith(("[", "{")):
             return inner
 
-    # ② 没有代码块但有裸 JSON，截取
-    for opener, closer in (("[", "]"), ("{", "}")):
-        i = s.find(opener)
-        j = s.rfind(closer)
-        if i != -1 and j > i:
-            return s[i : j + 1].strip()
+    # ② 裸 JSON：**配对扫描**，不用「find + rfind」。
+    #    ★ 踩过的坑：原实现先试 '[' 再试 '{'，用 rfind 找结尾符。
+    #      模型输出「数组开头 + 对象结尾」时（实测素材分析就这形态：
+    #      ["年份前置锚点式", ...],\n "core_words": [...]}），
+    #      rfind(']') 会找到前面的 ']' 而不是配对的那个，
+    #      截出来的是**残缺 JSON**，解析必失败。
+    #    现在做括号配对，天然处理嵌套与「数组+对象」混合输出。
+    start = next((k for k in (s.find("{"), s.find("[")) if k != -1), -1)
+    if start != -1:
+        opener = s[start]
+        closer = "}" if opener == "{" else "]"
+        depth = 0
+        for idx in range(start, len(s)):
+            ch = s[idx]
+            if ch == opener:
+                depth += 1
+            elif ch == closer:
+                depth -= 1
+                if depth == 0:
+                    return s[start : idx + 1].strip()
 
     # ③ 常规清洗（纯文本场景）
     s = re.sub(r"^#{1,6}\s*", "", s, flags=re.M)

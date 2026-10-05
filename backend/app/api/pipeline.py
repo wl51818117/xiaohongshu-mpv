@@ -243,24 +243,167 @@ class MaterialToTopicIn(BaseModel):
     """从素材直接建选题（用户在素材库点「加入选题」时用）。"""
 
     material_id: int
-    title: str = Field("", description="自定义选题标题，留空则用素材原标题")
-    keyword: str = Field("", description="目标长尾词，留空则自动抽取")
+    title: str = Field("", description="自定义选题标题，留空则用分析结果生成")
+    keyword: str = Field("", description="目标长尾词，留空则从分析结果取")
     persona: str = ""
     value_type: str = "实用"
+    # ★ 是否调用 AI 深度分析（会慢一些，但能给出可借鉴的规律）
+    use_ai: bool = Field(True, description="关闭则只用规则分析（瞬时）")
+
+
+def _merge_ai(rules: dict, ai: dict) -> dict:
+    """把 AI 分析结果并入规则分析（AI 优先，规则兜底）。
+
+    ★ 允许 AI 只返回部分字段——小模型常只给标题结构那一块，
+      剩下的用规则结果补。**部分结果比「AI 失败」有用得多**。
+    """
+    if ai.get("error"):
+        return rules
+
+    out = dict(rules)
+    out["ai"] = {k: v for k, v in ai.items() if k != "error"}
+    out["ai_partial"] = bool(ai.get("_partial"))
+    out["source"] = "rules+ai"
+
+    ai_title = ai.get("title_analysis") or {}
+    if ai_title:
+        out.setdefault("title_analysis", {})
+        # AI 的结构识别通常比规则库细，两个都留着
+        if ai_title.get("patterns"):
+            out["title_analysis"]["ai_patterns"] = ai_title["patterns"]
+        if ai_title.get("hook"):
+            out["title_analysis"]["ai_hook"] = ai_title["hook"]
+        if ai_title.get("core_words"):
+            out["title_analysis"]["core_words"] = ai_title["core_words"]
+
+    ai_content = ai.get("content_analysis") or {}
+    if ai_content:
+        ca = out.setdefault("content_analysis", {})
+        for src, dst in (
+            ("target_persona", "ai_target_persona"),
+            ("core_pain", "ai_core_pain"),
+            ("value_delivered", "ai_value"),
+            ("cta", "ai_cta"),
+        ):
+            if ai_content.get(src):
+                ca[dst] = ai_content[src]
+
+    if ai.get("reuse_advice"):
+        out["reuse_advice"] = ai["reuse_advice"]
+    return out
+
+
+def _derive_topic_fields(
+    analysis: dict, mat, payload: "MaterialToTopicIn"
+) -> dict[str, str]:
+    """基于分析结果生成选题的三个核心字段。
+
+    ★ 与「照搬标题」的区别：
+      照搬 → 选题 = 素材标题（同质化风险高，且不是我们的人群/商品）
+      这里 → 从分析里取「目标人群 + 痛点 + 场景」重新组织
+
+    优先级：AI 的 our_angle > 规则推导 > 素材原标题（兜底）
+    """
+    ta = analysis.get("title_analysis") or {}
+    ca = analysis.get("content_analysis") or {}
+    reuse = analysis.get("reuse_advice") or {}
+
+    # 标题：AI 建议的切入角度 > 规则拼装 > 原标题
+    title = (reuse.get("our_angle") or "").strip()
+    if not title:
+        persona = (
+            (ca.get("ai_target_persona") or "").strip()
+            or _guess_persona(ca, analysis)
+        )
+        pains = ca.get("pains") or []
+        scenes = ca.get("scenes") or []
+        scene = scenes[0] if scenes else ""
+        core = (ta.get("core_words") or [])[:1]
+        core_txt = core[0] if core else ""
+
+        # ★ 拼接必须读得通。原实现「{scene}怎么{pain}」会造出
+        #   「露营怎么勒」这种病句——「勒」是症状不是疑问对象。
+        #   改为「场景 + 核心词 + 疑问式后缀」，只拼能构成疑问的成分。
+        if scene and core_txt:
+            title = f"{scene}{core_txt}怎么挑"
+        elif core_txt:
+            title = f"{core_txt}怎么选"
+        elif scene:
+            title = f"{scene}场景怎么选"
+        elif pains:
+            # 有痛点无场景：退到痛点做「避坑」式，仍是可执行题目
+            title = f"{pains[0]['name']}别忽视"
+        elif persona:
+            title = f"{persona}关心的选购问题"
+
+    # 关键词：**AI 识别的核心搜索词优先**，其次规则提取，最后话题兜底。
+    # ★ 话题不等于搜索词：话题「兴趣消费」是内容分类，
+    #   用户搜的是「露营装备怎么选」这种具体短语。
+    keyword = ""
+    ai_words = ta.get("core_words") or []
+    rule_words = ta.get("core_words") or []
+    topics = analysis.get("topics") or []
+
+    for w in (*ai_words, *rule_words):
+        w = str(w).strip()
+        # 长尾搜索词通常 2-6 字
+        if 2 <= len(w) <= 6:
+            keyword = w
+            break
+    if not keyword and topics:
+        # 兜底用话题，但**标注来源**，让人知道这不是真正的搜索词
+        keyword = str(topics[0])[:6]
+
+    # 人群
+    persona = (
+        (payload.persona or "").strip()
+        or (ca.get("ai_target_persona") or "").strip()[:200]
+        or _guess_persona(ca, analysis)
+    )
+
+    return {
+        "title": (title or mat.title or "")[:500],
+        "keyword": keyword[:200],
+        "persona": persona,
+    }
+
+
+def _guess_persona(ca: dict, analysis: dict) -> str:
+    """从场景/痛点推一个人群描述（没有 AI 结论时的兜底）。"""
+    scenes = ca.get("scenes") or []
+    pains = ca.get("pains") or []
+    if scenes and pains:
+        return f"有「{scenes[0]}」需求、被{pains[0]['name']}困扰的人"
+    if scenes:
+        return f"{scenes[0]}场景下的用户"
+    return ""
 
 
 @router.post("/materials/{material_id}/to-topic", summary="素材直接转选题")
-def material_to_topic(
+async def material_to_topic(
     material_id: int,
     payload: MaterialToTopicIn,
     db: Session = Depends(get_db),
 ) -> dict:
-    """把一条素材转成选题。
+    """把一条素材转成**可执行选题**。
 
-    素材库里的内容默认只是「待转换」，用户也可以主动挑一条直接建选题。
+    ★★ 2026-10-05 重构（之前是流程错误）：
+      原来这里直接 `标题 = 素材标题`，等于把素材标题搬运一遍——
+      标题没分析、正文没提炼、图片完全没参与，
+      `extracted_elements` 字段设计了但从没被填过。
+      转出来的东西**没有二次创作价值**。
+
+      现在改成：采集 → **分析** → 基于分析生成选题。
+      分析包含：
+        1. 标题用了什么结构（数字式/提问式/反常识…）
+        2. 核心搜索词是什么
+        3. 正文里有哪些**痛点信号**（带原文）
+        4. 讲的是哪些场景
+        5. 封面图的规格是否符合 3:4
+        6. （可选）AI 深度分析：可借鉴什么、必须改什么、我们该怎么切入
     """
     from app.db.models import RawMaterial
-    from app.services import topic_converter
+    from app.services import material_analyzer, topic_converter
 
     mat = db.get(RawMaterial, material_id)
     if not mat:
@@ -276,11 +419,31 @@ def material_to_topic(
             detail=f"素材命中合规黑名单（{'、'.join(hits[:3])}），不能转选题",
         )
 
-    title = (payload.title or "").strip() or mat.title
-    # ★ 不再调 extract_keyword：那个函数已改为「抽不出就返回空串」
-    #   （正则切不出词，与其给垃圾不如留空）。于是所有素材的 keyword
-    #   都是空串，撞上下面的去重逻辑 → 全部被判「重复」。
-    keyword = (payload.keyword or "").strip()
+    # ── 第1 步：规则分析（瞬时，永远可用）──
+    analysis = material_analyzer.analyze_rules(mat)
+
+    # ── 第 2 步：AI 深度分析（可选，失败不阻塞）──
+    ai_result: dict = {}
+    if payload.use_ai:
+        ai_result = await material_analyzer.analyze_with_ai(mat)
+        if ai_result.get("error"):
+            # 不让 AI 失败毁掉整个流程，规则分析已经够用
+            ai_result = {"error": ai_result["error"]}
+        else:
+            # AI 结果合并进 analysis
+            analysis = _merge_ai(analysis, ai_result)
+
+    # 存回素材，形成可复用的资产（下次不用重复分析）
+    elements = dict(mat.extracted_elements or {})
+    elements["analysis"] = analysis
+    mat.extracted_elements = elements
+    db.commit()
+
+    # ── 第 3 步：基于分析生成选题（不是照搬标题）──
+    gen = _derive_topic_fields(analysis, mat, payload)
+    title = (payload.title or "").strip() or gen["title"]
+    keyword = (payload.keyword or "").strip() or gen["keyword"]
+    persona = (payload.persona or "").strip() or gen["persona"]
 
     # ── 去重：优先按素材 ID 判（最准：同一素材不该转两次）──
     existing = (
@@ -310,18 +473,36 @@ def material_to_topic(
                 "reason": f"库中已有相同标题与关键词的选题 #{dup.id}",
             }
 
+    # 差异化：优先用分析结果（比关键词匹配准得多）
+    pains = (analysis.get("content_analysis") or {}).get("pains") or []
+    scenes = (analysis.get("content_analysis") or {}).get("scenes") or []
+    diffs: list[str] = []
+    if pains:
+        diffs.append(f"改痛点角度（原文痛点：{pains[0]['name']}）")
+    if scenes:
+        diffs.append(f"换场景（原文场景：{scenes[0]}）")
+    if getattr(mat, "source_type", "") == SourceType.BROWSER:
+        # 浏览器采的必须是他人内容 → 必须重写，不能照搬
+        diffs.append("全文重写（他人内容，仅借鉴结构）")
+    if not diffs:
+        diffs = topic_converter.build_differentiation(mat)
+
     t = Topic(
         title=title[:500],
         keyword_target=keyword[:200],
-        persona=(payload.persona or topic_converter.detect_persona(text) or "")[:200],
+        persona=(persona or topic_converter.detect_persona(text) or "")[:200],
         value_type=payload.value_type,
-        differentiation=topic_converter.build_differentiation(mat),
+        differentiation=diffs,
         material_id=mat.id,
         status=TopicStatus.POOLED,
         # 浏览器采来的是他人内容 → 二次创作原创风险高，标在选题上提醒
         originality_risk=(
             "high" if getattr(mat, "source_type", "") == SourceType.BROWSER else "low"
         ),
+        # 把分析结论带进选题，供稿件阶段直接用（不用重新分析）
+        pain_point=(pains[0]["name"] if pains else "")[:300],
+        scene=(scenes[0] if scenes else "")[:50],
+        evidence=analysis.get("topics", [])[:3],
     )
     db.add(t)
     db.commit()
@@ -333,6 +514,35 @@ def material_to_topic(
         "id": t.id,
         "title": t.title,
         "keyword": t.keyword_target,
+        "persona": t.persona,
+        "differentiation": diffs,
+        # ★ 把分析结论返回给前端，让用户看到「为什么这么转」
+        "analysis": {
+            "title_patterns": (analysis.get("title_analysis") or {}).get("patterns", []),
+            "core_words": (analysis.get("title_analysis") or {}).get("core_words", []),
+            "hook": (
+                (analysis.get("title_analysis") or {}).get("ai_hook")
+                or next(
+                    (
+                        p.get("why")
+                        for p in (analysis.get("title_analysis") or {})
+                        .get("pattern_detail", [])
+                    ),
+                    "",
+                )
+            ),
+            "pains": pains[:3],
+            "scenes": scenes,
+            "ai_target_persona": (analysis.get("content_analysis") or {}).get(
+                "ai_target_persona", ""
+            ),
+            "ai_core_pain": (analysis.get("content_analysis") or {}).get(
+                "ai_core_pain", ""
+            ),
+            "image": analysis.get("image_analysis", {}),
+            "reuse_advice": analysis.get("reuse_advice", {}),
+            "source": analysis.get("source", "rules"),
+        },
     }
     if not keyword:
         # 明确告诉调用方：选题建了，但缺关键词，必须补
@@ -340,7 +550,61 @@ def material_to_topic(
             "选题已创建，但**没有长尾词**。空关键词的稿件无法通过校验，"
             "请到选题库补上核心词（如「一次性内裤 差旅」）。"
         )
+    if analysis.get("image_analysis", {}).get("available") is False:
+        result.setdefault("hints", []).append(
+            "未采集到封面图。封面承载「谁在用、什么场景」，"
+            "缺了会让选题少一个判断维度——建议在浏览器里重采一次。"
+        )
     return result
+
+
+@router.get("/materials/{material_id}/analysis", summary="查看素材分析结果")
+def get_analysis(material_id: int, db: Session = Depends(get_db)) -> dict:
+    """查看某条素材的分析结果（不含重新分析，只读已存的）。"""
+    from app.db.models import RawMaterial
+
+    mat = db.get(RawMaterial, material_id)
+    if not mat:
+        raise HTTPException(status_code=404, detail="素材不存在")
+    analysis = (mat.extracted_elements or {}).get("analysis")
+    if not analysis:
+        return {
+            "ok": True,
+            "analyzed": False,
+            "hint": "这条素材还没分析过。点「加入选题」时会自动分析，"
+            "或调 POST /api/materials/{id}/analyze",
+        }
+    return {"ok": True, "analyzed": True, "analysis": analysis}
+
+
+@router.post("/materials/{material_id}/analyze", summary="单独分析素材（不建选题）")
+async def analyze_only(
+    material_id: int, db: Session = Depends(get_db)
+) -> dict:
+    """只分析不建选题——用户想先看看「系统从这条素材里看出了什么」。"""
+    from app.db.models import RawMaterial
+    from app.services import material_analyzer
+
+    mat = db.get(RawMaterial, material_id)
+    if not mat:
+        raise HTTPException(status_code=404, detail="素材不存在")
+
+    analysis = material_analyzer.analyze_rules(mat)
+    ai_result = await material_analyzer.analyze_with_ai(mat)
+    if not ai_result.get("error"):
+        analysis = _merge_ai(analysis, ai_result)
+
+    elements = dict(mat.extracted_elements or {})
+    elements["analysis"] = analysis
+    mat.extracted_elements = elements
+    db.commit()
+
+    return {
+        "ok": True,
+        "material_id": mat.id,
+        "title": mat.title,
+        "analysis": analysis,
+    }
 
 
 @router.delete("/topics/{topic_id}", summary="删除选题")
