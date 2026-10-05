@@ -47,6 +47,26 @@ function pickText(selectors, root = document) {
   return ''
 }
 
+/** 取属性值（如 meta 标签的 content、video 的 poster） */
+function pickAttr(selector, attr) {
+  const el = document.querySelector(selector)
+  const v = el?.getAttribute?.(attr)?.trim()
+  return v || ''
+}
+
+/** 取第一个非空图片的 src（用于封面兜底） */
+function pickFirstImgSrc(selectors) {
+  for (const sel of selectors) {
+    const el = document.querySelector(sel)
+    const src =
+      el?.getAttribute?.('src') ||
+      el?.getAttribute?.('data-src') ||
+      (el?.tagName === 'IMG' ? el.src : '')
+    if (src && !src.startsWith('data:')) return src
+  }
+  return ''
+}
+
 /** 解析「1.2万」这类数字 */
 function parseCount(s) {
   if (!s) return null
@@ -60,14 +80,14 @@ function parseCount(s) {
   return Number.isFinite(n) ? Math.round(n) : null
 }
 
-/** 提取当前页面的内容 */
+/** 提取当前页面的内容（含封面图） */
 function extract() {
   const host = location.hostname
   const platform = detectPlatform(host)
   if (!platform) return { ok: false, error: '当前站点不在支持列表' }
 
   const block = blockedBy()
-  if (block) {
+  if ( block) {
     return { ok: false, error: `${block}。扩展不会尝试绕过，请先手动完成验证。` }
   }
 
@@ -76,11 +96,30 @@ function extract() {
   let topics = []
   let author = ''
   let noteType = ''
+  let cover = ''
   const metrics = {}
+
+  // ── 封面图提取（通用，放最前面）──
+  // ★ 采集的封面要转存到本机，不能直接存小红书的 CDN 地址：
+  //   1) CDN 通常带防盗链签名，过期后 URL 就失效了
+  //   2) 别人图片的 URL 留在库里，将来二次创作时拿不到图
+  cover =
+    pickAttr('meta[property="og:image"]', 'content') ||
+    pickAttr('meta[name="twitter:image"]', 'content') ||
+    pickFirstImgSrc([
+      '.note-slider-img',
+      '.swiper-slide img',
+      '.player-container img',
+      '.cover img',
+      'video[poster]',
+    ]) ||
+    ''
+  if (cover && !cover.startsWith('http')) {
+    cover = cover.startsWith('//') ? `https:${cover}` : new URL(cover, location.href).href
+  }
 
   if (platform === '小红书') {
     // ★ 选择器要多备几套：小红书改版频繁，老选择器会失效
-    //   （踩过：只留老选择器，新版详情页识别不到标题）
     title = pickText([
       '#detail-title',              // 老版
       '.note-content .title',       // 老版
@@ -88,7 +127,6 @@ function extract() {
       '[class*="title"][class*="note"]',
       '.note-detail-mask .title',
       'h1.title',
-      // 新版常见：标题在 class 含 title 的 div/h1 里
       'div[class*="Title"] h1',
       'h1[class*="Title"]',
       'h1',
@@ -142,6 +180,9 @@ function extract() {
       'span[data-e2e="video-author-uniqueid"]', '.author-name h1', '[class*="author"] span',
     ])
     noteType = '视频'
+    // 抖音封面常在 video 的 poster 或 cover 容器里
+    cover =
+      pickAttr('video', 'poster') || cover
     topics = [
       ...document.querySelectorAll('.video-tag, .hashtag, a[href*="/hashtag/"]'),
     ]
@@ -151,7 +192,6 @@ function extract() {
     const m = pickText(['.video-like-count', '[data-e2e="video-like-count"]'])
     metrics.likes = parseCount(m)
   } else {
-    // 其他平台：通用兜底
     const og = document.querySelector('meta[property="og:title"]')?.content || ''
     const desc = document.querySelector('meta[name="description"]')?.content || ''
     title = pickText(['h1', 'article h1']) || og || document.title
@@ -165,7 +205,7 @@ function extract() {
       ok: false,
       error:
         '没识别到标题。可能是页面没加载完，或者不是内容详情页' +
-        '（试试点开一篇笔记再采集）。若持续失败，按F12 看控制台是否有扩展报错。',
+        '（请点开一篇笔记再采集）。若持续失败，按 F12 看控制台有无扩展报错。',
     }
   }
 
@@ -175,6 +215,9 @@ function extract() {
       url: location.href.slice(0, 1000),
       title: title.trim().slice(0, 500),
       content: (content || '').trim().slice(0, 20000),
+      //★ 标题之外还要回传全文——此前只传了标题，正文丢失
+      full_text: (document.body?.innerText || '').trim().slice(0, 30000),
+      cover: (cover || '').slice(0, 1000),
       topics: [...new Set(topics)].slice(0, 10),
       author_display: (author || '').trim().slice(0, 200),
       note_type: noteType,

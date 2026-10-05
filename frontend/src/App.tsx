@@ -214,19 +214,34 @@ export default function App() {
   const addMaterialToTopic = async (m: Material) => {
     setBusy(`mat-${m.id}`)
     try {
-      const r = await fetch(`/api/pipeline/materials/${m.id}/to-topic`, {
+      // ★ 路径是 /api/materials/... 不是 /api/pipeline/materials/...
+      //   后端 router 的 prefix 是 /api（pipeline.py:17），
+      //   前端之前写成 /api/pipeline/... → 必然 404。
+      //   报错被 catch 吞成「加入选题失败」，看不出是路径错。
+      const r = await fetch(`/api/materials/${m.id}/to-topic`, {
         method: 'POST',
         headers: { 'content-type': 'application/json' },
         body: JSON.stringify({ material_id: m.id }),
       }).then((x) => x.json())
       if (r.created) {
-        notify('ok', `已加入选题库 #${r.id}：${(r.title || '').slice(0, 24)}`)
+        // ★ 把后端返回的 warning 透出来：空关键词的选题建了也过不了校验，
+        //   不告诉用户等于埋雷（实测踩过：用户以为成功了，稿件却一直不通过）
+        const msg = r.warning
+          ? `已加入选题库 #${r.id}，但${r.warning}`
+          : `已加入选题库 #${r.id}：${(r.title || '').slice(0, 24)}`
+        notify(r.warning ? 'err' : 'ok', msg)
       } else {
-        notify('err', '该素材已在选题库中，未重复创建')
+        // ★ 显示后端给的真实原因，不要一律报「已在选题库」
+        //   （实测：空关键词导致所有素材都撞车，提示与实际不符）
+        notify('err', r.reason || `该素材已存在对应选题 #${r.id}，未重复创建`)
       }
       void refresh()
     } catch (e) {
-      notify('err', `加入选题失败：${(e as Error).message}`)
+      // ★ 把后端返回的 detail 也带出来：
+      //   之前 catch 里只显示「加入选题失败」，404 和 500 看起来一样，
+      //   排查时完全看不出是路径错还是逻辑错。
+      const detail = (e as { detail?: string })?.detail
+      notify('err', `加入选题失败：${detail || (e as Error).message}`)
     } finally {
       setBusy(null)
     }

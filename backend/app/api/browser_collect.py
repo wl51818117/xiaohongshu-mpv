@@ -19,6 +19,8 @@ from __future__ import annotations
 
 import hashlib
 import re
+import uuid
+from pathlib import Path
 from typing import Any, Literal
 
 from fastapi import APIRouter, Depends, HTTPException
@@ -69,6 +71,8 @@ class CollectIn(BaseModel):
 
     # ── 内容 ──
     content: str = Field("", description="正文（如果页面上有）")
+    full_text: str = Field("", description="页面全文，用于补足正文（评论区等）")
+    cover: str = Field("", description="封面图 URL（后端会转存到本机）")
     topics: list[str] = Field(default_factory=list, description="话题标签")
     author_display: str = Field(
         "", description="页面显示的博主昵称（公开信息，用于标注来源）"
@@ -136,6 +140,60 @@ def _fingerprint(url: str, title: str) -> str:
     return hashlib.sha256(raw).hexdigest()[:32]
 
 
+# 封面图转存目录
+_COVER_DIR = Path(__file__).resolve().parents[2] / "assets" / "covers"
+
+
+def _save_cover(url: str, referer: str) -> str:
+    """把封面图下载到本机，返回相对路径（失败则返回空串）。
+
+    ★ 为什么要转存而不能直接存 CDN 地址：
+      1) 小红书的图床 URL **带签名且会过期**，过一阵子就 403
+      2) 二次创作时需要真的把图取出来用
+      3) 把别人图片的临时 URL 长期留在库里没有意义
+
+    失败不阻塞采集——图是锦上添花，正文才是主体。
+    """
+    if not url or not url.startswith(("http://", "https://")):
+        return ""
+    try:
+        import httpx
+    except ImportError:
+        return ""
+
+    try:
+        _COVER_DIR.mkdir(parents=True, exist_ok=True)
+        # 带 Referer：多数图床对无来源的请求直接 403
+        r = httpx.get(
+            url,
+            timeout=20,
+            follow_redirects=True,
+            headers={
+                "Referer": referer,
+                "User-Agent": (
+                    "Mozilla/5.0 (Windows NT 10.0; Win64; x64) "
+                    "AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0 Safari/537.36"
+                ),
+            },
+        )
+        if r.status_code != 200 or not r.content:
+            return ""
+        ctype = r.headers.get("content-type", "")
+        ext = ".jpg"
+        if "png" in ctype:
+            ext = ".png"
+        elif "webp" in ctype:
+            ext = ".webp"
+        elif "gif" in ctype:
+            ext = ".gif"
+        name = f"cover_{uuid.uuid4().hex[:12]}{ext}"
+        (_COVER_DIR / name).write_bytes(r.content)
+        return f"assets/covers/{name}"
+    except Exception:  # noqa: BLE001
+        # 图挂了不该让整次采集失败
+        return ""
+
+
 @router.post("/collect", summary="接收浏览器扩展采集的单条内容")
 def collect(payload: CollectIn, db: Session = Depends(get_db)) -> dict[str, Any]:
     """接收一条浏览器采集的内容。
@@ -171,17 +229,25 @@ def collect(payload: CollectIn, db: Session = Depends(get_db)) -> dict[str, Any]
         select(RawMaterial).where(RawMaterial.content_hash == chash)
     ).scalar_one_or_none()
 
+    # 正文：优先用 content，不足时用页面全文补（含评论区，便于挖需求）
+    body = (payload.content or "").strip()
+    if len(body) < 50 and payload.full_text:
+        body = payload.full_text.strip()[:20000]
+
+    # 封面转存（失败不阻塞）
+    cover_path = _save_cover(payload.cover, payload.url) if payload.cover else ""
+
     if existing:
         # 更新互动数与内容（用户可能补采了更完整的正文）
         existing.title = payload.title[:500]
-        if payload.content.strip():
-            existing.raw_content = payload.content[:20000]
-            existing.summary = payload.content[:300]
+        if body:
+            existing.raw_content = body[:20000]
+            existing.summary = body[:300]
         if metrics:
             existing.metrics = {**(existing.metrics or {}), **metrics}
-        if topics:
-            existing.topics_json = topics  # 复用 see below
         existing.source_url = payload.url[:1000]
+        if cover_path:
+            existing.cover_url = cover_path
         db.commit()
         db.refresh(existing)
         return {
@@ -190,6 +256,8 @@ def collect(payload: CollectIn, db: Session = Depends(get_db)) -> dict[str, Any]
             "id": existing.id,
             "title": existing.title,
             "metrics": existing.metrics,
+            "body_len": len(existing.raw_content or ""),
+            "cover": existing.cover_url or "",
         }
 
     item = RawMaterial(
@@ -197,15 +265,16 @@ def collect(payload: CollectIn, db: Session = Depends(get_db)) -> dict[str, Any]
         source_url=payload.url[:1000],
         source_name=f"{platform}·浏览器采集",
         title=payload.title[:500],
-        raw_content=payload.content[:20000],
-        summary=payload.content[:300],
+        raw_content=body[:20000],
+        summary=body[:300],
         # 公开显示的昵称只作来源标注，不是个人数据挖掘
         author=(payload.author_display or "")[:200],
         own_flag=0,  # 别人家的内容，原创风险默认不低
         metrics=metrics,
         content_hash=chash,
+        cover_url=cover_path,
         # 浏览器采来的是他人内容，二次创作原创风险高
-        originality_risk="high" if not payload.keyword.strip() else "medium",
+        originality_risk="high",
     )
     # 话题存进 extracted_elements（raw_materials 没有独立 topic 列）
     item.extracted_elements = {
@@ -213,20 +282,29 @@ def collect(payload: CollectIn, db: Session = Depends(get_db)) -> dict[str, Any]
         "note_type": payload.note_type,
         "platform": platform,
         "user_keyword": payload.keyword.strip(),
+        "cover_remote": (payload.cover or "")[:1000],
     }
     db.add(item)
     db.commit()
     db.refresh(item)
 
-    return {
+    result = {
         "ok": True,
         "action": "created",
         "id": item.id,
         "title": item.title,
         "metrics": metrics,
         "topics": topics,
-        "note": f"已存入素材库（来源：{platform}·浏览器采集）",
+        "body_len": len(item.raw_content or ""),
+        "cover": item.cover_url or "",
     }
+    if not body:
+        result["warning"] = "没抓到正文，采集到的可能只有标题（详情页需要点开笔记）"
+    if not cover_path:
+        result["cover_note"] = "封面图未转存成功（可能是图床防盗链），不影响其他内容"
+    else:
+        result["note"] = f"已存入素材库（来源：{platform}·浏览器采集，封面已转存）"
+    return result
 
 
 @router.get("/status", summary="扩展连接状态")

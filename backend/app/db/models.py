@@ -90,6 +90,9 @@ class RawMaterial(Base):
     extracted_elements: Mapped[dict] = mapped_column(JSON, default=dict)
     # 原创风险等级：low / medium / high
     originality_risk: Mapped[str] = mapped_column(String(20), default="low")
+    # ★ 采集时抓到的封面图（浏览器扩展转存到 assets/covers/ 下的本地路径）
+    #   为什么要转存：图床 URL 带签名会过期，且二次创作时需要真拿到图
+    cover_url: Mapped[str] = mapped_column(String(500), default="")
 
     # 采集去重用的内容指纹
     content_hash: Mapped[str] = mapped_column(String(64), index=True)
@@ -220,6 +223,10 @@ class Topic(Base):
     )
     # 综合效果分（由数据回流写入，替代原来恒为 0.0 的占位）
     score: Mapped[float] = mapped_column(Float, default=0.0)
+    # ★ 原创风险（2026-10-05）：从素材继承。
+    #   浏览器采来的是**别人家的内容** → high，提醒不可直接发布。
+    #   选题层面的原创风险与素材不同：选题是自己定的，但素材可能是抄的。
+    originality_risk: Mapped[str] = mapped_column(String(20), default="low")
 
     # 溯源：来自哪条素材
     material_id: Mapped[int | None] = mapped_column(

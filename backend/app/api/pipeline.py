@@ -10,7 +10,7 @@ from pydantic import BaseModel, Field, field_validator
 from sqlalchemy import func
 from sqlalchemy.orm import Session
 
-from app.db.models import RawMaterial, Topic, TopicStatus
+from app.db.models import RawMaterial, SourceType, Topic, TopicStatus
 from app.db.session import get_db
 from app.services import rss_collector, topic_converter
 
@@ -267,18 +267,38 @@ def material_to_topic(
         )
 
     title = (payload.title or "").strip() or mat.title
-    keyword = (payload.keyword or "").strip() or topic_converter.extract_keyword(
-        mat.title, mat.summary or ""
-    )
+    # ★ 不再调 extract_keyword：那个函数已改为「抽不出就返回空串」
+    #   （正则切不出词，与其给垃圾不如留空）。于是所有素材的 keyword
+    #   都是空串，撞上下面的去重逻辑 → 全部被判「重复」。
+    keyword = (payload.keyword or "").strip()
 
-    # 同一素材已有选题则不重复创建
+    # ── 去重：优先按素材 ID 判（最准：同一素材不该转两次）──
     existing = (
         db.query(Topic)
-        .filter(Topic.title == title, Topic.keyword_target == keyword)
+        .filter(Topic.material_id == mat.id)
         .first()
     )
     if existing:
-        return {"ok": True, "created": False, "id": existing.id, "title": existing.title}
+        return {
+            "ok": True, "created": False,
+            "id": existing.id, "title": existing.title,
+            "reason": f"该素材已转成选题 #{existing.id}，不重复创建",
+        }
+
+    # 其次按「标题 + 关键词」判，且**两者都不能为空**——
+    # 空关键词会让所有素材互撞（实测踩过：提示「已在选题库」但其实是误判）
+    if title and keyword:
+        dup = (
+            db.query(Topic)
+            .filter(Topic.title == title, Topic.keyword_target == keyword)
+            .first()
+        )
+        if dup:
+            return {
+                "ok": True, "created": False,
+                "id": dup.id, "title": dup.title,
+                "reason": f"库中已有相同标题与关键词的选题 #{dup.id}",
+            }
 
     t = Topic(
         title=title[:500],
@@ -287,19 +307,30 @@ def material_to_topic(
         value_type=payload.value_type,
         differentiation=topic_converter.build_differentiation(mat),
         material_id=mat.id,
-        status=topic_converter.TopicStatus.POOLED,
+        status=TopicStatus.POOLED,
+        # 浏览器采来的是他人内容 → 二次创作原创风险高，标在选题上提醒
+        originality_risk=(
+            "high" if getattr(mat, "source_type", "") == SourceType.BROWSER else "low"
+        ),
     )
     db.add(t)
     db.commit()
     db.refresh(t)
 
-    return {
+    result = {
         "ok": True,
         "created": True,
         "id": t.id,
         "title": t.title,
         "keyword": t.keyword_target,
     }
+    if not keyword:
+        # 明确告诉调用方：选题建了，但缺关键词，必须补
+        result["warning"] = (
+            "选题已创建，但**没有长尾词**。空关键词的稿件无法通过校验，"
+            "请到选题库补上核心词（如「一次性内裤 差旅」）。"
+        )
+    return result
 
 
 @router.delete("/topics/{topic_id}", summary="删除选题")
