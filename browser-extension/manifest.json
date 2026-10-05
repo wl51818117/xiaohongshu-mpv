@@ -3,7 +3,11 @@
   "name": "工作台需求采集助手",
   "version": "0.1.0",
   "description": "在你正在浏览的小红书/抖音网页上点一下，把看到的内容存进工作台需求库。采集由你主动触发，不自动抓取。",
-  "permissions": ["activeTab", "scripting", "storage"],
+  "permissions": [
+    "activeTab",
+    "scripting",
+    "storage"
+  ],
   "host_permissions": [
     "http://127.0.0.1:8000/*",
     "*://*.xiaohongshu.com/*",
@@ -21,13 +25,17 @@
         "*://*.weibo.com/*",
         "*://*.zhihu.com/*"
       ],
-      "js": ["content.js"],
-      "css": ["content.css"],
+      "js": [
+        "content.js"
+      ],
       "run_at": "document_idle"
     }
   ],
   "action": {
     "default_title": "采集当前页",
     "default_popup": "popup.html"
+  },
+  "background": {
+    "service_worker": "background.js"
   }
 }

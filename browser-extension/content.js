@@ -13,7 +13,8 @@
  */
 
 const API = 'http://127.0.0.1:8000/api/browser/collect'
-const FLOAT_ID = 'wb-collect-float'
+// 提示条与按钮都放在 Shadow DOM 里，页面 CSS 管不到，
+// 所以不再需要全局 id。
 
 /** 平台识别 */
 function detectPlatform(host) {
@@ -78,49 +79,94 @@ function extract() {
   const metrics = {}
 
   if (platform === '小红书') {
-    // 详情页：#detail-title / .title 是标题，#detail-desc 是正文
+    // ★ 选择器要多备几套：小红书改版频繁，老选择器会失效
+    //   （踩过：只留老选择器，新版详情页识别不到标题）
     title = pickText([
-      '#detail-title',
-      'div.note-content .title',
-      'span.note-content .title',
+      '#detail-title',              // 老版
+      '.note-content .title',       // 老版
+      'h1#detail-title',
+      '[class*="title"][class*="note"]',
+      '.note-detail-mask .title',
       'h1.title',
+      // 新版常见：标题在 class 含 title 的 div/h1 里
+      'div[class*="Title"] h1',
+      'h1[class*="Title"]',
+      'h1',
     ])
-    content = pickText(['#detail-desc', 'div.note-content .desc', '.desc'])
-    author = pickText(['.author-wrapper .username', '.author-name', '#user-name'])
+    content = pickText([
+      '#detail-desc',
+      '.note-content .desc',
+      '.desc',
+      '[class*="desc"][class*="note"]',
+      'span[class*="desc"]',
+    ])
+    author = pickText([
+      '.author-wrapper .username',
+      '.author-name',
+      '#user-name',
+      '[class*="author"] [class*="name"]',
+      '.author-container .name',
+    ])
     noteType = document.querySelector('.note-slider-video, video') ? '视频' : '图文'
 
-    const likeEl = document.querySelector('#like-wrapper .count, .engage-bar .like-wrapper .count')
-    const cmtEl = document.querySelector('#comment-count .count, .engage-bar .chat-wrapper .count')
-    const colEl = document.querySelector('#collect-wrapper .count, .engage-bar .collect-wrapper .count')
+    const likeEl = document.querySelector(
+      '#like-wrapper .count, .engage-bar .like-wrapper .count, [class*="like"][class*="count"]'
+    )
+    const cmtEl = document.querySelector(
+      '#comment-count .count, .engage-bar .chat-wrapper .count, [class*="comment"][class*="count"]'
+    )
+    const colEl = document.querySelector(
+      '#collect-wrapper .count, .engage-bar .collect-wrapper .count, [class*="collect"][class*="count"]'
+    )
     metrics.likes = parseCount(likeEl?.textContent)
     metrics.comments = parseCount(cmtEl?.textContent)
     metrics.collects = parseCount(colEl?.textContent)
 
-    topics = [...document.querySelectorAll('.topic-tag, a.tag, .note-content .tag')
+    topics = [
+      ...document.querySelectorAll(
+        '.topic-tag, a.tag, .note-content .tag, [class*="topic"], .hashtag'
+      ),
+    ]
       .map((e) => e.textContent?.trim())
-      .filter((t) => t && t.length < 24)].slice(0, 10)
+      .filter((t) => t && t.length < 24)
+      .slice(0, 10)
   } else if (platform === '抖音') {
-    title = pickText(['h1[data-e2e]', 'div.video-title h1', 'h1._1gtRw31'])
-    content = pickText(['div.video-info-detail', 'div[data-e2e="video-desc"]'])
-    author = pickText(['span[data-e2e="video-author-uniqueid"]', '.author-name h1'])
+    title = pickText([
+      'h1[data-e2e]', 'div.video-title h1', 'h1._1gtRw31',
+      '[class*="video-title"] h1', 'h1',
+    ])
+    content = pickText([
+      'div.video-info-detail', 'div[data-e2e="video-desc"]', '[class*="video-info"]',
+    ])
+    author = pickText([
+      'span[data-e2e="video-author-uniqueid"]', '.author-name h1', '[class*="author"] span',
+    ])
     noteType = '视频'
-    topics = [...document.querySelectorAll('.video-tag, .hashtag, a[href*="/hashtag/"]')
+    topics = [
+      ...document.querySelectorAll('.video-tag, .hashtag, a[href*="/hashtag/"]'),
+    ]
       .map((e) => e.textContent?.trim())
-      .filter((t) => t && t.length < 24)].slice(0, 10)
+      .filter((t) => t && t.length < 24)
+      .slice(0, 10)
     const m = pickText(['.video-like-count', '[data-e2e="video-like-count"]'])
     metrics.likes = parseCount(m)
   } else {
     // 其他平台：通用兜底
-    title = pickText(['h1', 'article h1', 'meta[property="og:title"]']) ||
-      document.querySelector('meta[property="og:title"]')?.content || document.title
-    content = pickText(['article', 'meta[property="og:description"]']) ||
-      document.querySelector('meta[name="description"]')?.content || ''
+    const og = document.querySelector('meta[property="og:title"]')?.content || ''
+    const desc = document.querySelector('meta[name="description"]')?.content || ''
+    title = pickText(['h1', 'article h1']) || og || document.title
+    content = pickText(['article']) || desc
     author = pickText(['[rel="author"]', '.author', '.author-name'])
     noteType = '网页'
   }
 
   if (!title || !title.trim()) {
-    return { ok: false, error: '没识别到标题。可能页面还没加载完，或不是内容详情页。' }
+    return {
+      ok: false,
+      error:
+        '没识别到标题。可能是页面没加载完，或者不是内容详情页' +
+        '（试试点开一篇笔记再采集）。若持续失败，按F12 看控制台是否有扩展报错。',
+    }
   }
 
   return {
@@ -142,37 +188,98 @@ function extract() {
   }
 }
 
-/** 提示条 */
-let toastTimer = null
-function toast(msg, kind = 'ok') {
-  const old = document.getElementById('wb-toast')
-  if (old) old.remove()
-  const el = document.createElement('div')
-  el.id = 'wb-toast'
-  el.textContent = msg
-  el.className = `wb-toast wb-toast-${kind}`
-  document.body.appendChild(el)
-  clearTimeout(toastTimer)
-  toastTimer = setTimeout(() => el.remove(), 3800)
+/** 提示条
+ *
+ * ★ 用 Shadow DOM 隔离：页面样式可能给 `div` 加高 z-index、
+ *   覆盖 position/字体等属性，导致 toast 看不见——表现同样是「没反应」。
+ *   放进 shadow root 后页面 CSS 管不到。
+ */
+let toastHost = null
+function getToastHost() {
+  if (toastHost && toastHost.isConnected) return toastHost
+  toastHost = document.createElement('div')
+  toastHost.style.cssText = 'all:initial;position:fixed;z-index:2147483647;top:0;left:0;'
+  const root = toastHost.attachShadow({ mode: 'open' })
+  const style = document.createElement('style')
+  style.textContent = `
+    .t {
+      position: fixed; left: 50%; top: 72px; transform: translateX(-50%);
+      max-width: 480px; padding: 10px 18px; border-radius: 10px;
+      font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI',
+        'PingFang SC', 'Microsoft YaHei', sans-serif;
+      font-size: 13px; line-height: 1.5; color: #fff;
+      box-shadow: 0 8px 28px rgba(0,0,0,.18);
+      animation: in .18s ease-out;
+    }
+    .ok { background: #10b981; }
+    .err { background: #ef4444; }
+    @keyframes in { from { opacity:0; transform:translateX(-50%) translateY(-6px); }
+                    to { opacity:1; transform:translateX(-50%) translateY(0); } }
+  `
+  root.appendChild(style)
+  document.body.appendChild(toastHost)
+  return toastHost
 }
 
-/** 浮层按钮 */
+let toastTimer = null
+function toast(msg, kind = 'ok') {
+  const host = getToastHost()
+  const old = host.shadowRoot?.querySelector('.t')
+  if (old) old.remove()
+
+  const el = document.createElement('div')
+  el.className = `t ${kind}`
+  el.textContent = msg
+  host.shadowRoot.appendChild(el)
+
+  clearTimeout(toastTimer)
+  toastTimer = setTimeout(() => el.remove(), 4200)
+}
+
+/** 浮层按钮
+ *
+ * ★ 同样用 Shadow DOM 隔离。小红书这类页面会给全局元素加样式，
+ *   直接插入的 div 可能被覆盖 z-index/position 而「看不见或点不到」。
+ */
+let buttonHost = null
 function injectButton() {
-  if (document.getElementById(FLOAT_ID)) return
+  if (buttonHost && buttonHost.isConnected) return
   if (!detectPlatform(location.hostname)) return
 
-  const wrap = document.createElement('div')
-  wrap.id = FLOAT_ID
-  wrap.innerHTML = `
-    <button class="wb-btn" title="把当前内容存进工作台需求库">
-      <span class="wb-btn-ico">＋</span><span>采集</span>
-    </button>
+  buttonHost = document.createElement('div')
+  buttonHost.style.cssText = 'all:initial;position:static;'
+  const root = buttonHost.attachShadow({ mode: 'open' })
+  root.innerHTML = `
+    <style>
+      .f {
+        position: fixed; right: 20px; bottom: 96px; z-index: 2147483646;
+        font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI',
+          'PingFang SC', 'Microsoft YaHei', sans-serif;
+      }
+      .b {
+        display: inline-flex; align-items: center; gap: 6px;
+        padding: 8px 14px; border: 1px solid rgba(124,58,237,.35);
+        border-radius: 999px; background: rgba(124,58,237,.92); color: #fff;
+        font-size: 13px; font-weight: 500; cursor: pointer;
+        box-shadow: 0 4px 16px rgba(124,58,237,.3);
+        transition: all .16s ease; user-select: none;
+      }
+      .b:hover { background: rgba(124,58,237,1); transform: translateY(-1px); }
+      .b:active { transform: translateY(0); }
+      .busy { opacity: .75; cursor: wait; }
+    </style>
+    <div class="f"><button class="b" title="把当前内容存进工作台需求库">
+      <span>＋</span><span>采集</span></button></div>
   `
-  document.body.appendChild(wrap)
+  document.body.appendChild(buttonHost)
 
-  wrap.querySelector('.wb-btn').addEventListener('click', async (e) => {
+  root.querySelector('.b').addEventListener('click', async (e) => {
+    // ★ 必须 stopPropagation：页面的全局点击处理器（选中文本、关弹层等）
+    //   可能把事件吃掉，导致看起来「点了没反应」。
     e.preventDefault()
-    const btn = wrap.querySelector('.wb-btn')
+    e.stopPropagation()
+
+    const btn = root.querySelector('.b')
     const res = extract()
 
     if (!res.ok) {
@@ -180,32 +287,43 @@ function injectButton() {
       return
     }
 
-    btn.classList.add('wb-btn-busy')
+    btn.classList.add('busy')
     const old = btn.innerHTML
-    btn.innerHTML = '<span class="wb-btn-ico">…</span><span>存入中</span>'
+    btn.innerHTML = '<span>…</span><span>存入中</span>'
 
     try {
-      const r = await fetch(API, {
-        method: 'POST',
-        headers: { 'content-type': 'application/json' },
-        body: JSON.stringify(res.payload),
+      // ★ 必须经 background 转发：页面 CSP 会拦截内容脚本的跨源请求
+      //   且**不报错**，表现就是点了没反应。
+      const reply = await chrome.runtime.sendMessage({
+        type: 'COLLECT',
+        api: API,
+        payload: res.payload,
       })
-      const d = await r.json()
-      if (!r.ok) {
-        toast(d.detail || '采集失败', 'err')
-      } else {
-        const total = d.metrics?.total
-        toast(
-          d.action === 'updated'
-            ? `已更新素材 #${d.id}`
-            : `已存入素材 #${d.id}${total ? `（互动 ${total}）` : ''}`,
-          'ok'
-        )
+
+      if (!reply) {
+        toast('扩展后台没有响应。请到 edge://extensions/ 重载扩展。', 'err')
+        return
       }
+      if (!reply.ok) {
+        toast(`采集失败：${reply.data?.detail || reply.status}`, 'err')
+        return
+      }
+
+      const d = reply.data || {}
+      const total = d.metrics?.total
+      toast(
+        d.action === 'updated'
+          ? `已更新素材 #${d.id}`
+          : `已存入素材 #${d.id}${total ? `（互动 ${total}）` : ''}`,
+        'ok'
+      )
     } catch (err) {
-      toast(`连不上工作台后端（${err.message}）。请确认 8000 端口已启动。`, 'err')
+      toast(
+        `采集异常：${err?.message ?? err}。若后端没启动，请先跑 8000 端口。`,
+        'err'
+      )
     } finally {
-      btn.classList.remove('wb-btn-busy')
+      btn.classList.remove('busy')
       btn.innerHTML = old
     }
   })
